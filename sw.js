@@ -2,7 +2,7 @@
 // still opens when offline or on a flaky connection. The data itself
 // (Firestore) has its own offline cache handled by the Firebase SDK.
 // Bump CACHE_NAME on any shell change to force clients onto new files.
-const CACHE_NAME = "savvy-shell-v2";
+const CACHE_NAME = "savvy-shell-v3";
 const SHELL_FILES = [
   "./index.html",
   "./styles.css",

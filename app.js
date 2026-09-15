@@ -163,12 +163,19 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     document.getElementById("googleSignInBtn").disabled = false;
     document.getElementById("authStatus").textContent = "";
   }
+  // Le foto profilo Google (lh3.googleusercontent.com/...) accettano un
+  // suffisso dimensione/ritaglio: "=s<px>-c" forza un crop quadrato pieno
+  // sul contenuto, invece del semplice ridimensionamento (che per foto non
+  // quadrate lascia margini vuoti attorno all'immagine).
+  function googleCropUrl(url, size) {
+    return url.replace(/=s\d+(-c)?$/, "") + "=s" + size + "-c";
+  }
   function showApp(user) {
     document.getElementById("authScreen").hidden = true;
     document.getElementById("app").hidden = false;
     var btn = document.getElementById("accountBtn");
     if (user.photoURL) {
-      btn.innerHTML = '<img src="' + user.photoURL + '" alt="">';
+      btn.innerHTML = '<img src="' + googleCropUrl(user.photoURL, 96) + '" alt="">';
     } else {
       btn.textContent = (user.displayName || user.email || "?").charAt(0).toUpperCase();
     }
@@ -912,7 +919,8 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
   }
 
   /* ============================= PWA: SERVICE WORKER ============================= */
-  if ("serviceWorker" in navigator) {
+  var isLocalDev = ["localhost", "127.0.0.1"].indexOf(location.hostname) !== -1;
+  if ("serviceWorker" in navigator && !isLocalDev) {
     window.addEventListener("load", function () {
       navigator.serviceWorker.register("./sw.js").catch(function () { /* non-fatal */ });
     });
