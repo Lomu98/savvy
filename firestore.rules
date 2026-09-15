@@ -1,0 +1,13 @@
+rules_version = '2';
+
+// Ogni documento vive sotto users/{uid}/... — questa regola permette a un
+// utente autenticato di leggere e scrivere SOLO i propri dati, mai quelli
+// di un altro uid. Incolla questo contenuto in:
+// Firebase Console → Firestore Database → Regole → Pubblica.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /users/{uid}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+  }
+}

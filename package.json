@@ -1,0 +1,9 @@
+{
+  "name": "spese-tracker",
+  "private": true,
+  "version": "1.0.0",
+  "description": "App personale per tracciare spese, budget mensili e spese ricorrenti. PWA installabile, backend Firebase (Auth + Firestore).",
+  "scripts": {
+    "dev": "npx serve . -l 3000"
+  }
+}
