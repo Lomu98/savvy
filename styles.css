@@ -134,7 +134,7 @@
 
 /* ============================= RESET / BASE ============================= */
 *, *::before, *::after{ box-sizing: border-box; }
-html, body{ height: 100%; height: 100dvh; }
+html, body{ height: 100%; height: 100dvh; background: var(--page); }
 body{
   margin: 0;
   background: var(--page);
@@ -173,11 +173,12 @@ p{ margin: 0; }
 #app{
   position: fixed;
   top: 0;
-  bottom: 0;
   left: 50%;
   transform: translateX(-50%);
   width: 100%;
   max-width: 560px;
+  height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
   background: var(--page);
