@@ -10,32 +10,32 @@
   --gridline:         #e1e0d9;
   --baseline:         #c3c2b7;
   --border:           rgba(11,11,11,0.10);
-  --success-text:     #006300;
+  --success-text:     #2f6b46;
 
-  --accent:           #2a78d6;
-  --accent-strong:    #184f95;
-  --accent-wash:      #e8f0fb;
+  --accent:           #b76e3d;
+  --accent-strong:    #8f5228;
+  --accent-wash:      #f3e7db;
 
-  --cat-alimentari:   #2a78d6;
-  --cat-trasporti:    #eb6834;
-  --cat-casa:         #1baf7a;
-  --cat-svago:        #eda100;
-  --cat-salute:       #e87ba4;
-  --cat-shopping:     #008300;
-  --cat-abbonamenti:  #4a3aa7;
-  --cat-altro:        #e34948;
+  --cat-alimentari:   #232a33;
+  --cat-trasporti:    #b76e3d;
+  --cat-casa:         #5a6b78;
+  --cat-svago:        #8a5a3f;
+  --cat-salute:       #8f4a5a;
+  --cat-shopping:     #6b7a4f;
+  --cat-abbonamenti:  #4a4a63;
+  --cat-altro:        #6f6b63;
 
-  --inc-stipendio:    #1baf7a;
-  --inc-freelance:    #0aa5a8;
-  --inc-regali:       #d9a520;
-  --inc-rimborsi:     #6a8caf;
-  --inc-investimenti: #4a3aa7;
-  --inc-altro:        #7a7a7a;
+  --inc-stipendio:    #3f8f5f;
+  --inc-freelance:    #4f8f8a;
+  --inc-regali:       #b78a3f;
+  --inc-rimborsi:     #5a7a8f;
+  --inc-investimenti: #6a5a8f;
+  --inc-altro:        #7a7568;
 
-  --good:             #0ca30c;
-  --warning:          #fab219;
-  --serious:          #ec835a;
-  --critical:         #d03b3b;
+  --good:             #3f8f5f;
+  --warning:          #b8862f;
+  --serious:          #a8583e;
+  --critical:         #a83e32;
 
   --font-display: "Sora", system-ui, -apple-system, "Segoe UI", sans-serif;
   --font-body:    "Public Sans", system-ui, -apple-system, "Segoe UI", sans-serif;
@@ -59,27 +59,32 @@
     --gridline:         #2c2c2a;
     --baseline:         #383835;
     --border:           rgba(255,255,255,0.10);
-    --success-text:     #0ca30c;
+    --success-text:     #5fbf8a;
 
-    --accent:           #3987e5;
-    --accent-strong:    #86b6ef;
-    --accent-wash:      rgba(57,135,229,0.14);
+    --accent:           #d1875a;
+    --accent-strong:    #e8a878;
+    --accent-wash:      rgba(209,135,90,0.16);
 
-    --cat-alimentari:   #3987e5;
-    --cat-trasporti:    #d95926;
-    --cat-casa:         #199e70;
-    --cat-svago:        #c98500;
-    --cat-salute:       #d55181;
-    --cat-shopping:     #008300;
-    --cat-abbonamenti:  #9085e9;
-    --cat-altro:        #e66767;
+    --good:             #5fbf8a;
+    --warning:          #d9a855;
+    --serious:          #cf7f60;
+    --critical:         #d1685a;
 
-    --inc-stipendio:    #22c48a;
-    --inc-freelance:    #1ec1c4;
-    --inc-regali:       #e6bb42;
-    --inc-rimborsi:     #8fb2d6;
-    --inc-investimenti: #9085e9;
-    --inc-altro:        #a0a0a0;
+    --cat-alimentari:   #4a5568;
+    --cat-trasporti:    #d1875a;
+    --cat-casa:         #8291a0;
+    --cat-svago:        #b0805f;
+    --cat-salute:       #c0788a;
+    --cat-shopping:     #9aab7a;
+    --cat-abbonamenti:  #8484a8;
+    --cat-altro:        #a29c90;
+
+    --inc-stipendio:    #5aab7a;
+    --inc-freelance:    #6bb0a8;
+    --inc-regali:       #d1a85a;
+    --inc-rimborsi:     #7a9fb0;
+    --inc-investimenti: #8f7ab0;
+    --inc-altro:        #a29c8c;
 
     --shadow-raised: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.35);
     --shadow-sheet: 0 -8px 32px rgba(0,0,0,0.5);
@@ -96,27 +101,32 @@
   --gridline:         #2c2c2a;
   --baseline:         #383835;
   --border:           rgba(255,255,255,0.10);
-  --success-text:     #0ca30c;
+  --success-text:     #5fbf8a;
 
-  --accent:           #3987e5;
-  --accent-strong:    #86b6ef;
-  --accent-wash:      rgba(57,135,229,0.14);
+  --accent:           #d1875a;
+  --accent-strong:    #e8a878;
+  --accent-wash:      rgba(209,135,90,0.16);
 
-  --cat-alimentari:   #3987e5;
-  --cat-trasporti:    #d95926;
-  --cat-casa:         #199e70;
-  --cat-svago:        #c98500;
-  --cat-salute:       #d55181;
-  --cat-shopping:     #008300;
-  --cat-abbonamenti:  #9085e9;
-  --cat-altro:        #e66767;
+  --good:             #5fbf8a;
+  --warning:          #d9a855;
+  --serious:          #cf7f60;
+  --critical:         #d1685a;
 
-  --inc-stipendio:    #22c48a;
-  --inc-freelance:    #1ec1c4;
-  --inc-regali:       #e6bb42;
-  --inc-rimborsi:     #8fb2d6;
-  --inc-investimenti: #9085e9;
-  --inc-altro:        #a0a0a0;
+  --cat-alimentari:   #4a5568;
+  --cat-trasporti:    #d1875a;
+  --cat-casa:         #8291a0;
+  --cat-svago:        #b0805f;
+  --cat-salute:       #c0788a;
+  --cat-shopping:     #9aab7a;
+  --cat-abbonamenti:  #8484a8;
+  --cat-altro:        #a29c90;
+
+  --inc-stipendio:    #5aab7a;
+  --inc-freelance:    #6bb0a8;
+  --inc-regali:       #d1a85a;
+  --inc-rimborsi:     #7a9fb0;
+  --inc-investimenti: #8f7ab0;
+  --inc-altro:        #a29c8c;
 
   --shadow-raised: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.35);
   --shadow-sheet: 0 -8px 32px rgba(0,0,0,0.5);

@@ -364,7 +364,7 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
   }
 
   /* ============================= CATEGORY PICKER (shared) ============================= */
-  var CATEGORY_COLOR_PALETTE = ["#2a78d6","#eb6834","#1baf7a","#eda100","#e87ba4","#008300","#4a3aa7","#e34948","#0aa5a8","#b5539a"];
+  var CATEGORY_COLOR_PALETTE = ["#b76e3d","#5a6b78","#8a5a3f","#3f8f5f","#8f4a5a","#6b7a4f","#4a4a63","#6f6b63","#4f8f8a","#b78a3f"];
   function randomCategoryColor(){ return CATEGORY_COLOR_PALETTE[Math.floor(Math.random() * CATEGORY_COLOR_PALETTE.length)]; }
 
   function categoryGridHtml(selectedSlug, name, kind) {
