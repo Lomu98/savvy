@@ -17,6 +17,20 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
 (function () {
   "use strict";
 
+  /* ============================= VIEWPORT HEIGHT (PWA fix) ============================= */
+  // Su alcune PWA iOS in standalone, 100dvh non include l'area sotto
+  // l'indicatore home nonostante viewport-fit=cover: si misura l'altezza
+  // reale via JS (fonte di verità del browser) invece di fidarsi delle
+  // unità CSS, che su questo caso specifico si sono rivelate inaffidabili.
+  function setAppHeight() {
+    var h = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
+    document.documentElement.style.setProperty("--app-height", h + "px");
+  }
+  setAppHeight();
+  window.addEventListener("resize", setAppHeight);
+  window.addEventListener("orientationchange", setAppHeight);
+  if (window.visualViewport) window.visualViewport.addEventListener("resize", setAppHeight);
+
   /* ============================= DATA ============================= */
   var DEFAULT_EXPENSE_CATEGORIES = [
     { slug: "alimentari",  name: "Alimentari",      color: "var(--cat-alimentari)" },

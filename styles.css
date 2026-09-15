@@ -179,7 +179,7 @@ p{ margin: 0; }
   max-width: 560px;
   height: 100vh;
   height: 100dvh;
-  height: calc(100dvh + env(safe-area-inset-bottom, 0px));
+  height: var(--app-height, 100dvh);
   display: flex;
   flex-direction: column;
   background: var(--page);
