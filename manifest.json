@@ -1,6 +1,6 @@
 {
-  "name": "Spese",
-  "short_name": "Spese",
+  "name": "Savvy",
+  "short_name": "Savvy",
   "description": "Traccia le tue spese per categoria, imposta budget mensili e monitora l'andamento nel tempo.",
   "start_url": "./index.html",
   "scope": "./",

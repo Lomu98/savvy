@@ -1,4 +1,4 @@
-# Spese
+# Savvy
 
 App personale per tracciare spese, impostare budget mensili per categoria, gestire spese ricorrenti e vedere l'andamento nel tempo. È una PWA installabile sul telefono, con i dati sincronizzati in tempo reale su tutti i tuoi dispositivi tramite Firebase.
 
@@ -7,7 +7,7 @@ Nessun framework, nessuna build: HTML, CSS e JavaScript puri (ES modules). Il ba
 ## Struttura del progetto
 
 ```
-spese-tracker/
+savvy/
 ├── index.html              markup della pagina
 ├── styles.css               tutti gli stili
 ├── app.js                   logica dell'app (stato, viste, grafici, Firebase)
@@ -24,7 +24,7 @@ spese-tracker/
 ## 1. Creare il progetto Firebase
 
 1. Vai su [console.firebase.google.com](https://console.firebase.google.com) e accedi con il tuo account Google.
-2. **Crea un progetto** (es. "spese-tracker"). Puoi disattivare Google Analytics, non serve.
+2. **Crea un progetto** (es. "savvy"). Puoi disattivare Google Analytics, non serve.
 3. Nella pagina del progetto, clicca l'icona **`</>`** ("Aggiungi app" → Web) per registrare una app web. Non serve Firebase Hosting: basta registrare l'app.
 4. Copia i valori mostrati in `firebaseConfig` (apiKey, authDomain, projectId, storageBucket, messagingSenderId, appId) e incollali in **`firebase-config.js`**, sostituendo i placeholder.
 5. Nel menu laterale vai su **Authentication** → scheda **Sign-in method** → abilita **Google** come provider → salva.
@@ -38,25 +38,25 @@ A questo punto il backend è pronto e gratuito (il piano Spark di Firebase copre
 I moduli ES (`import`/`export` usati in `app.js`) richiedono che la pagina sia servita via `http://`, non aperta come file (`file://`) — altrimenti il browser blocca gli import per motivi di sicurezza. Serve quindi un piccolo server locale:
 
 ```bash
-cd spese-tracker
+cd savvy
 npm run dev
 ```
 
-Questo avvia un server statico su `http://localhost:3000` (usa `npx serve`, non richiede installazioni). Apri quell'indirizzo nel browser, accedi con Google e inizia ad aggiungere spese.
+Questo avvia un server statico su `http://localhost:4173` (usa `npx serve`, non richiede installazioni). Apri quell'indirizzo nel browser, accedi con Google e inizia ad aggiungere spese.
 
-Se non hai Node.js installato: puoi scaricarlo da [nodejs.org](https://nodejs.org) (versione LTS), oppure usare in alternativa `python3 -m http.server 3000`.
+Se non hai Node.js installato: puoi scaricarlo da [nodejs.org](https://nodejs.org) (versione LTS), oppure usare in alternativa `python3 -m http.server 4173`.
 
 ## 3. Creare la repository su GitHub
 
 Il progetto è già inizializzato come repository Git locale (con un primo commit). Per pubblicarlo su GitHub:
 
 ```bash
-cd spese-tracker
+cd savvy
 
 # Se non l'hai già fatto, crea la repo vuota su GitHub da https://github.com/new
 # (NON aggiungere README/licenza/.gitignore lì: esistono già qui)
 
-git remote add origin https://github.com/<tuo-utente>/spese-tracker.git
+git remote add origin https://github.com/<tuo-utente>/savvy.git
 git branch -M main
 git push -u origin main
 ```
@@ -64,8 +64,8 @@ git push -u origin main
 In alternativa, se hai la GitHub CLI (`gh`) installata e autenticata:
 
 ```bash
-cd spese-tracker
-gh repo create spese-tracker --private --source=. --remote=origin --push
+cd savvy
+gh repo create savvy --private --source=. --remote=origin --push
 ```
 
 ## 4. Deploy su Vercel
@@ -73,7 +73,7 @@ gh repo create spese-tracker --private --source=. --remote=origin --push
 **Opzione A — dashboard (più semplice):**
 
 1. Vai su [vercel.com](https://vercel.com), accedi (puoi usare il tuo account GitHub).
-2. **Add New → Project** → seleziona la repo `spese-tracker` che hai appena creato.
+2. **Add New → Project** → seleziona la repo `savvy` che hai appena creato.
 3. Framework Preset: lascialo su **Other** (è un sito statico, non serve alcuna build command né output directory diversa dalla root).
 4. Clicca **Deploy**.
 
@@ -81,18 +81,18 @@ gh repo create spese-tracker --private --source=. --remote=origin --push
 
 ```bash
 npm i -g vercel
-cd spese-tracker
+cd savvy
 vercel        # segue un wizard interattivo, poi:
 vercel --prod
 ```
 
-Al termine otterrai un URL tipo `https://spese-tracker.vercel.app`, servito in HTTPS — condizione necessaria perché il service worker e l'installazione come PWA funzionino.
+Al termine otterrai un URL tipo `https://savvy.vercel.app`, servito in HTTPS — condizione necessaria perché il service worker e l'installazione come PWA funzionino.
 
 ### Un passaggio importante dopo il primo deploy
 
 Firebase Authentication accetta login solo da **domini autorizzati**. Il dominio Vercel che ti viene assegnato non è autorizzato di default:
 
-1. Copia il dominio del deploy (es. `spese-tracker.vercel.app`, oppure il tuo dominio personalizzato se ne colleghi uno).
+1. Copia il dominio del deploy (es. `savvy.vercel.app`, oppure il tuo dominio personalizzato se ne colleghi uno).
 2. Firebase Console → **Authentication** → **Settings** → **Authorized domains** → **Add domain** → incolla il dominio.
 3. Ricarica la pagina: ora "Accedi con Google" funzionerà anche in produzione.
 

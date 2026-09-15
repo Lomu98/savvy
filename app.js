@@ -1,4 +1,4 @@
-// Spese — app di tracciamento spese personali.
+// Savvy — app di tracciamento spese personali.
 // Backend: Firebase Authentication (Google Sign-In) + Firestore.
 // Ogni utente autenticato legge/scrive solo sotto users/{uid}/... —
 // vedi firestore.rules per l'applicazione lato server di questa regola.

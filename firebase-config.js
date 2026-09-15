@@ -15,10 +15,10 @@
 // Vedi il README per la guida completa passo passo.
 
 export const FIREBASE_CONFIG = {
-  apiKey: "INSERISCI_LA_TUA_API_KEY",
-  authDomain: "INSERISCI_IL_TUO_PROGETTO.firebaseapp.com",
-  projectId: "INSERISCI_IL_TUO_PROGETTO_ID",
-  storageBucket: "INSERISCI_IL_TUO_PROGETTO.appspot.com",
-  messagingSenderId: "INSERISCI_IL_TUO_SENDER_ID",
-  appId: "INSERISCI_IL_TUO_APP_ID"
+  apiKey: "AIzaSyDzlVMK7Oqd5rGUNpNdoUIO99TT3N9A1qc",
+  authDomain: "savvy-6bd0a.firebaseapp.com",
+  projectId: "savvy-6bd0a",
+  storageBucket: "savvy-6bd0a.firebasestorage.app",
+  messagingSenderId: "330934062636",
+  appId: "1:330934062636:web:2a8b0387687b6d374a8b89"
 };
