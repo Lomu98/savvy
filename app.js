@@ -18,7 +18,7 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
   "use strict";
 
   /* ============================= DATA ============================= */
-  var DEFAULT_CATEGORIES = [
+  var DEFAULT_EXPENSE_CATEGORIES = [
     { slug: "alimentari",  name: "Alimentari",      color: "var(--cat-alimentari)" },
     { slug: "trasporti",   name: "Trasporti",       color: "var(--cat-trasporti)" },
     { slug: "casa",        name: "Casa e bollette", color: "var(--cat-casa)" },
@@ -28,8 +28,22 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     { slug: "abbonamenti", name: "Abbonamenti",     color: "var(--cat-abbonamenti)" },
     { slug: "altro",       name: "Altro",           color: "var(--cat-altro)" }
   ];
-  function getCategories(){ return DEFAULT_CATEGORIES.concat(state.customCategories); }
-  function catByslug(slug){ return getCategories().find(function(c){ return c.slug === slug; }) || DEFAULT_CATEGORIES[DEFAULT_CATEGORIES.length-1]; }
+  var DEFAULT_INCOME_CATEGORIES = [
+    { slug: "stipendio",     name: "Stipendio",     color: "var(--inc-stipendio)" },
+    { slug: "freelance",     name: "Freelance",     color: "var(--inc-freelance)" },
+    { slug: "regali",        name: "Regali",        color: "var(--inc-regali)" },
+    { slug: "rimborsi",      name: "Rimborsi",      color: "var(--inc-rimborsi)" },
+    { slug: "investimenti",  name: "Investimenti",  color: "var(--inc-investimenti)" },
+    { slug: "altro-entrata", name: "Altro",         color: "var(--inc-altro)" }
+  ];
+  function allCategories(){ return DEFAULT_EXPENSE_CATEGORIES.concat(DEFAULT_INCOME_CATEGORIES).concat(state.customCategories); }
+  function getCategories(kind){
+    kind = kind || "expense";
+    var defaults = kind === "income" ? DEFAULT_INCOME_CATEGORIES : DEFAULT_EXPENSE_CATEGORIES;
+    var custom = state.customCategories.filter(function(c){ return (c.kind || "expense") === kind; });
+    return defaults.concat(custom);
+  }
+  function catByslug(slug){ return allCategories().find(function(c){ return c.slug === slug; }) || DEFAULT_EXPENSE_CATEGORIES[DEFAULT_EXPENSE_CATEGORIES.length-1]; }
   function catInitial(slug){ return catByslug(slug).name.charAt(0).toUpperCase(); }
   function slugify(s){
     return s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
@@ -37,7 +51,7 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
   }
   function uniqueCategorySlug(name){
     var base = slugify(name), slug = base, n = 2;
-    var existing = getCategories();
+    var existing = allCategories();
     while (existing.some(function(c){ return c.slug === slug; })) { slug = base + "-" + n; n++; }
     return slug;
   }
@@ -45,11 +59,13 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
   /* ============================= STATE ============================= */
   var state = {
     expenses: [],
+    incomes: [],
     budgets: {},
     recurring: [],
     customCategories: [],
     currentMonth: monthKeyFromDate(new Date()),
     currentView: "home",
+    listType: "expense",
     listFilter: "all"
   };
   var toastTimer = null;
@@ -84,6 +100,9 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
 
   function expensesForMonth(ym){
     return state.expenses.filter(function(e){ return typeof e.date === "string" && e.date.slice(0,7) === ym; });
+  }
+  function incomesForMonth(ym){
+    return state.incomes.filter(function(e){ return typeof e.date === "string" && e.date.slice(0,7) === ym; });
   }
   function totalOf(list){ return list.reduce(function(s,e){ return s + (Number(e.amount) || 0); }, 0); }
   function sumByCategory(list){
@@ -123,7 +142,7 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
   }
 
   var currentUser = null;
-  var unsubExpenses = null, unsubBudgets = null, unsubRecurring = null, unsubCategories = null;
+  var unsubExpenses = null, unsubIncomes = null, unsubBudgets = null, unsubRecurring = null, unsubCategories = null;
 
   function userCollection(name){ return collection(dbFs, "users", currentUser.uid, name); }
   function userDoc(name, id){ return doc(dbFs, "users", currentUser.uid, name, id); }
@@ -205,6 +224,12 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
         renderCurrentView();
       }, function () { /* connectivity banner covers persistent failures */ });
 
+      var incomesQuery = query(userCollection("incomes"), orderBy("date", "desc"), limit(1000));
+      unsubIncomes = onSnapshot(incomesQuery, function (snap) {
+        state.incomes = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
+        renderCurrentView();
+      }, function () { /* connectivity banner covers persistent failures */ });
+
       unsubBudgets = onSnapshot(userCollection("budgets"), function (snap) {
         var map = {};
         snap.docs.forEach(function (d) { var data = d.data(); map[d.id] = Number(data.limit) || 0; });
@@ -219,7 +244,8 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
 
       unsubCategories = onSnapshot(userCollection("categories"), function (snap) {
         state.customCategories = snap.docs.map(function (d) {
-          return { slug: d.id, name: d.data().name, color: d.data().color, custom: true };
+          var data = d.data();
+          return { slug: d.id, name: data.name, color: data.color, kind: data.kind || "expense", custom: true };
         });
         renderCurrentView();
       }, function () {});
@@ -227,11 +253,12 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
   }
   function unsubscribeAll() {
     if (unsubExpenses) unsubExpenses();
+    if (unsubIncomes) unsubIncomes();
     if (unsubBudgets) unsubBudgets();
     if (unsubRecurring) unsubRecurring();
     if (unsubCategories) unsubCategories();
-    unsubExpenses = unsubBudgets = unsubRecurring = unsubCategories = null;
-    state.expenses = []; state.budgets = {}; state.recurring = []; state.customCategories = [];
+    unsubExpenses = unsubIncomes = unsubBudgets = unsubRecurring = unsubCategories = null;
+    state.expenses = []; state.incomes = []; state.budgets = {}; state.recurring = []; state.customCategories = [];
   }
 
   function dbAddExpense(data) {
@@ -239,6 +266,12 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
   }
   function dbDeleteExpense(id) {
     return deleteDoc(userDoc("expenses", id)).catch(function () { showToast("Eliminazione non riuscita."); });
+  }
+  function dbAddIncome(data) {
+    return addDoc(userCollection("incomes"), data).catch(function () { showToast("Non salvato: controlla la connessione."); });
+  }
+  function dbDeleteIncome(id) {
+    return deleteDoc(userDoc("incomes", id)).catch(function () { showToast("Eliminazione non riuscita."); });
   }
   function dbSetBudget(slug, limitVal) {
     return setDoc(userDoc("budgets", slug), { category: slug, limit: limitVal }).catch(function () { showToast("Budget non salvato."); });
@@ -252,8 +285,8 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
   function dbDeleteRecurring(id) {
     return deleteDoc(userDoc("recurring", id)).catch(function () { showToast("Eliminazione non riuscita."); });
   }
-  function dbAddCategory(slug, name, color) {
-    return setDoc(userDoc("categories", slug), { name: name, color: color }).catch(function () { showToast("Categoria non salvata."); });
+  function dbAddCategory(slug, name, color, kind) {
+    return setDoc(userDoc("categories", slug), { name: name, color: color, kind: kind || "expense" }).catch(function () { showToast("Categoria non salvata."); });
   }
 
   /* ============================= CONNECTIVITY BANNER ============================= */
@@ -300,7 +333,10 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
   document.querySelectorAll(".tab-btn").forEach(function (btn) {
     btn.addEventListener("click", function () { setView(btn.dataset.view); });
   });
-  document.getElementById("fabAdd").addEventListener("click", openAddExpenseSheet);
+  document.getElementById("fabAdd").addEventListener("click", function () {
+    var kind = (state.currentView === "list" && state.listType === "income") ? "income" : "expense";
+    openAddTransactionSheet(kind);
+  });
 
   document.getElementById("prevMonthBtn").addEventListener("click", function () {
     state.currentMonth = addMonths(state.currentMonth, -1);
@@ -331,8 +367,8 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
   var CATEGORY_COLOR_PALETTE = ["#2a78d6","#eb6834","#1baf7a","#eda100","#e87ba4","#008300","#4a3aa7","#e34948","#0aa5a8","#b5539a"];
   function randomCategoryColor(){ return CATEGORY_COLOR_PALETTE[Math.floor(Math.random() * CATEGORY_COLOR_PALETTE.length)]; }
 
-  function categoryGridHtml(selectedSlug, name) {
-    var grid = '<div class="cat-grid" id="' + name + '">' + getCategories().map(function (c) {
+  function categoryGridHtml(selectedSlug, name, kind) {
+    var grid = '<div class="cat-grid" id="' + name + '">' + getCategories(kind).map(function (c) {
       return '<div class="cat-opt' + (c.slug === selectedSlug ? " selected" : "") + '" data-slug="' + c.slug + '">' +
         '<span class="cat-dot" style="background:' + c.color + '"></span><span>' + escapeHtml(c.name) + '</span></div>';
     }).join("") +
@@ -349,7 +385,8 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
       '</div></div>';
     return grid + form;
   }
-  function wireCategoryGrid(gridId, onSelect) {
+  function wireCategoryGrid(gridId, onSelect, kind) {
+    kind = kind || "expense";
     var grid = document.getElementById(gridId);
     var form = document.getElementById(gridId + "NewCat");
 
@@ -374,9 +411,9 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
       var color = form.querySelector(".new-cat-color").value;
       if (!name) { showToast("Inserisci un nome per la categoria."); return; }
       var slug = uniqueCategorySlug(name);
-      var newCat = { slug: slug, name: name, color: color, custom: true };
+      var newCat = { slug: slug, name: name, color: color, kind: kind, custom: true };
       state.customCategories.push(newCat);
-      dbAddCategory(slug, name, color);
+      dbAddCategory(slug, name, color, kind);
 
       var tile = document.createElement("div");
       tile.className = "cat-opt";
@@ -392,86 +429,129 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     });
   }
 
-  /* ============================= ADD EXPENSE SHEET ============================= */
-  var lastUsedCategory = DEFAULT_CATEGORIES[0].slug;
-  function openAddExpenseSheet() {
+  /* ============================= ADD TRANSACTION SHEET ============================= */
+  var lastUsedExpenseCategory = DEFAULT_EXPENSE_CATEGORIES[0].slug;
+  var lastUsedIncomeCategory = DEFAULT_INCOME_CATEGORIES[0].slug;
+  function openAddTransactionSheet(kind, prefill) {
+    kind = kind || "expense";
+    var isIncome = kind === "income";
+    var lastUsed = isIncome ? lastUsedIncomeCategory : lastUsedExpenseCategory;
+    prefill = prefill || {};
     var html =
-      '<h3>Nuova spesa</h3>' +
-      '<div class="field amount-field"><label for="expAmount">Importo</label>' +
-        '<input type="number" id="expAmount" inputmode="decimal" step="0.01" min="0" placeholder="0,00" autofocus></div>' +
-      '<div class="field"><label>Categoria</label>' + categoryGridHtml(lastUsedCategory, "addCatGrid") + '</div>' +
-      '<div class="field"><label for="expDate">Data</label><input type="date" id="expDate" value="' + todayISO() + '"></div>' +
-      '<div class="field"><label for="expNote">Nota (opzionale)</label><input type="text" id="expNote" placeholder="Es. Spesa al supermercato" maxlength="120"></div>' +
-      '<button class="btn-primary" id="saveExpenseBtn">Aggiungi spesa</button>';
+      '<h3>Nuovo movimento</h3>' +
+      '<div class="type-toggle" id="txTypeToggle">' +
+        '<button type="button" class="type-toggle-btn' + (!isIncome ? " active" : "") + '" data-kind="expense">Spesa</button>' +
+        '<button type="button" class="type-toggle-btn' + (isIncome ? " active" : "") + '" data-kind="income">Entrata</button>' +
+      '</div>' +
+      '<div class="field amount-field"><label for="txAmount">Importo</label>' +
+        '<input type="number" id="txAmount" inputmode="decimal" step="0.01" min="0" placeholder="0,00" autofocus></div>' +
+      '<div class="field"><label>Categoria</label>' + categoryGridHtml(lastUsed, "addCatGrid", kind) + '</div>' +
+      '<div class="field"><label for="txDate">Data</label><input type="date" id="txDate" value="' + todayISO() + '"></div>' +
+      '<div class="field"><label for="txNote">Nota (opzionale)</label><input type="text" id="txNote" placeholder="' + (isIncome ? "Es. Bonifico stipendio" : "Es. Spesa al supermercato") + '" maxlength="120"></div>' +
+      '<button class="btn-primary" id="saveTxBtn">' + (isIncome ? "Aggiungi entrata" : "Aggiungi spesa") + '</button>';
     openSheet(html);
-    var selectedCat = lastUsedCategory;
-    wireCategoryGrid("addCatGrid", function (slug) { selectedCat = slug; });
-    document.getElementById("saveExpenseBtn").addEventListener("click", function () {
-      var amountVal = parseFloat(document.getElementById("expAmount").value);
-      var dateVal = document.getElementById("expDate").value || todayISO();
-      var noteVal = document.getElementById("expNote").value.trim();
+    if (prefill.amount) document.getElementById("txAmount").value = prefill.amount;
+    if (prefill.date) document.getElementById("txDate").value = prefill.date;
+    if (prefill.note) document.getElementById("txNote").value = prefill.note;
+
+    document.querySelectorAll("#txTypeToggle .type-toggle-btn").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        if (btn.dataset.kind === kind) return;
+        openAddTransactionSheet(btn.dataset.kind, {
+          amount: document.getElementById("txAmount").value,
+          date: document.getElementById("txDate").value,
+          note: document.getElementById("txNote").value
+        });
+      });
+    });
+
+    var selectedCat = lastUsed;
+    wireCategoryGrid("addCatGrid", function (slug) { selectedCat = slug; }, kind);
+    document.getElementById("saveTxBtn").addEventListener("click", function () {
+      var amountVal = parseFloat(document.getElementById("txAmount").value);
+      var dateVal = document.getElementById("txDate").value || todayISO();
+      var noteVal = document.getElementById("txNote").value.trim();
       if (!amountVal || amountVal <= 0) { showToast("Inserisci un importo valido."); return; }
-      lastUsedCategory = selectedCat;
-      dbAddExpense({
+      if (isIncome) lastUsedIncomeCategory = selectedCat; else lastUsedExpenseCategory = selectedCat;
+      var data = {
         amount: Math.round(amountVal * 100) / 100,
         category: selectedCat,
         date: dateVal,
         note: noteVal,
         recurringId: null,
         createdAt: new Date().toISOString()
-      });
+      };
+      if (isIncome) dbAddIncome(data); else dbAddExpense(data);
       closeSheet();
-      showToast("Spesa aggiunta");
+      showToast(isIncome ? "Entrata aggiunta" : "Spesa aggiunta");
     });
   }
 
-  /* ============================= EXPENSE DETAIL SHEET ============================= */
-  function openExpenseDetail(expense) {
-    var cat = catByslug(expense.category);
+  /* ============================= TRANSACTION DETAIL SHEET ============================= */
+  function openTransactionDetail(tx, kind) {
+    kind = kind || "expense";
+    var isIncome = kind === "income";
+    var cat = catByslug(tx.category);
     var html =
-      '<h3 style="text-align:center">Dettaglio spesa</h3>' +
-      '<div class="detail-amount">' + formatMoney(expense.amount) + '</div>' +
+      '<h3 style="text-align:center">Dettaglio ' + (isIncome ? "entrata" : "spesa") + '</h3>' +
+      '<div class="detail-amount' + (isIncome ? " income" : "") + '">' + (isIncome ? "+" : "") + formatMoney(tx.amount) + '</div>' +
       '<div class="detail-cat"><span class="cat-dot" style="display:inline-block;background:' + cat.color + ';margin-right:6px;vertical-align:middle"></span>' + cat.name + '</div>' +
-      '<div class="detail-row"><span>Data</span><span>' + formatDayHeading(expense.date) + '</span></div>' +
-      (expense.note ? '<div class="detail-row"><span>Nota</span><span>' + escapeHtml(expense.note) + '</span></div>' : '') +
-      (expense.recurringId ? '<div class="detail-row"><span>Origine</span><span>Spesa ricorrente</span></div>' : '') +
+      '<div class="detail-row"><span>Data</span><span>' + formatDayHeading(tx.date) + '</span></div>' +
+      (tx.note ? '<div class="detail-row"><span>Nota</span><span>' + escapeHtml(tx.note) + '</span></div>' : '') +
+      (tx.recurringId ? '<div class="detail-row"><span>Origine</span><span>' + (isIncome ? "Entrata ricorrente" : "Spesa ricorrente") + '</span></div>' : '') +
       '<div style="margin-top:18px; display:flex; flex-direction:column; gap:10px">' +
-      '<button class="btn-danger" id="deleteExpBtn">Elimina spesa</button>' +
+      '<button class="btn-danger" id="deleteTxBtn">Elimina ' + (isIncome ? "entrata" : "spesa") + '</button>' +
       '<button class="btn-ghost" id="cancelDetailBtn">Chiudi</button>' +
       '</div>';
     openSheet(html);
     document.getElementById("cancelDetailBtn").addEventListener("click", closeSheet);
-    document.getElementById("deleteExpBtn").addEventListener("click", function () {
+    document.getElementById("deleteTxBtn").addEventListener("click", function () {
       var btn = this;
       if (btn.dataset.armed !== "1") {
         btn.dataset.armed = "1";
         btn.textContent = "Conferma eliminazione";
         return;
       }
-      dbDeleteExpense(expense.id);
+      if (isIncome) dbDeleteIncome(tx.id); else dbDeleteExpense(tx.id);
       closeSheet();
-      showToast("Spesa eliminata");
+      showToast(isIncome ? "Entrata eliminata" : "Spesa eliminata");
     });
   }
 
   /* ============================= HOME VIEW ============================= */
+  function recentTransactions(monthExpenses, monthIncomes, n) {
+    var all = monthExpenses.map(function (e) { return Object.assign({ _kind: "expense" }, e); })
+      .concat(monthIncomes.map(function (e) { return Object.assign({ _kind: "income" }, e); }));
+    all.sort(function (a, b) {
+      if (a.date !== b.date) return a.date < b.date ? 1 : -1;
+      return (a.createdAt || "") < (b.createdAt || "") ? 1 : -1;
+    });
+    return all.slice(0, n);
+  }
   function renderHome() {
     var el = document.getElementById("view-home");
     var monthExpenses = expensesForMonth(state.currentMonth);
-    var total = totalOf(monthExpenses);
+    var monthIncomes = incomesForMonth(state.currentMonth);
+    var expenseTotal = totalOf(monthExpenses);
+    var incomeTotal = totalOf(monthIncomes);
+    var net = incomeTotal - expenseTotal;
     var totalBudget = Object.keys(state.budgets).reduce(function (s, k) { return s + (Number(state.budgets[k]) || 0); }, 0);
     var hasBudget = totalBudget > 0;
-    var pct = hasBudget ? total / totalBudget : 0;
+    var pct = hasBudget ? expenseTotal / totalBudget : 0;
     var status = statusForPct(pct);
 
     var pendingRecurring = getPendingRecurring();
 
     var html = '<div class="card">' +
-      '<div class="hero-label">Speso a ' + formatMonthLabel(state.currentMonth) + '</div>' +
-      '<div class="hero-amount num">' + formatMoney(total) + '</div>';
+      '<div class="hero-label">Saldo a ' + formatMonthLabel(state.currentMonth) + '</div>' +
+      '<div class="hero-amount num ' + (net < 0 ? "negative" : "positive") + '">' + (net < 0 ? "−" : "") + formatMoney(Math.abs(net)) + '</div>' +
+      '<div class="hero-split">' +
+        '<span class="hero-split-item income"><span class="hero-split-dot"></span>Entrate <b class="num">' + formatMoney(incomeTotal) + '</b></span>' +
+        '<span class="hero-split-item expense"><span class="hero-split-dot"></span>Uscite <b class="num">' + formatMoney(expenseTotal) + '</b></span>' +
+      '</div>';
     if (hasBudget) {
       html += '<div class="meter-track"><div class="meter-fill ' + status + '" style="width:' + Math.min(100, pct * 100) + '%"></div></div>' +
-        '<div class="status-row ' + status + '">' + statusIcon(status) + '<span>' + statusLabel(status) + ' — ' + formatMoney(totalBudget - total >= 0 ? totalBudget - total : total - totalBudget) + (totalBudget - total >= 0 ? ' rimanenti' : ' oltre il budget di ' + formatMoney(totalBudget)) + '</span></div>';
+        '<div class="status-row ' + status + '">' + statusIcon(status) + '<span>' + statusLabel(status) + ' — ' + formatMoney(totalBudget - expenseTotal >= 0 ? totalBudget - expenseTotal : expenseTotal - totalBudget) + (totalBudget - expenseTotal >= 0 ? ' rimanenti' : ' oltre il budget di ' + formatMoney(totalBudget)) + '</span></div>';
     } else {
       html += '<div class="hero-sub">Nessun budget impostato per questo mese.</div>' +
         '<button class="link-btn" id="goSetBudget" style="margin-top:6px">Imposta un budget →</button>';
@@ -479,12 +559,12 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     html += '</div>';
 
     if (pendingRecurring.length) {
-      html += '<div class="banner-cta"><p><strong>' + pendingRecurring.length + '</strong> ' + (pendingRecurring.length === 1 ? "spesa ricorrente" : "spese ricorrenti") + ' da aggiungere.</p>' +
+      html += '<div class="banner-cta"><p><strong>' + pendingRecurring.length + '</strong> ' + (pendingRecurring.length === 1 ? "movimento ricorrente" : "movimenti ricorrenti") + ' da aggiungere.</p>' +
         '<button id="goRecurringBanner">Gestisci</button></div>';
     }
 
     var bySlug = sumByCategory(monthExpenses);
-    var topCats = getCategories().map(function (c) { return { cat: c, amount: bySlug[c.slug] || 0 }; })
+    var topCats = getCategories("expense").map(function (c) { return { cat: c, amount: bySlug[c.slug] || 0 }; })
       .filter(function (x) { return x.amount > 0; })
       .sort(function (a, b) { return b.amount - a.amount; })
       .slice(0, 3);
@@ -496,13 +576,14 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
         }).join("") + '</div>';
     }
 
-    var recent = monthExpenses.slice(0, 5);
+    var recent = recentTransactions(monthExpenses, monthIncomes, 5);
+    var totalCount = monthExpenses.length + monthIncomes.length;
     html += '<div class="section-title" style="display:flex;justify-content:space-between;align-items:center">' +
-      '<span>Spese recenti</span>' + (monthExpenses.length > 5 ? '<button class="link-btn" id="seeAllBtn" style="margin:0">Vedi tutte</button>' : '') + '</div>';
+      '<span>Transazioni recenti</span>' + (totalCount > 5 ? '<button class="link-btn" id="seeAllBtn" style="margin:0">Vedi tutte</button>' : '') + '</div>';
     if (recent.length) {
-      html += '<div class="card">' + recent.map(txRowHtml).join("") + '</div>';
+      html += '<div class="card">' + recent.map(function (e) { return txRowHtml(e); }).join("") + '</div>';
     } else {
-      html += emptyStateHtml("Nessuna spesa registrata questo mese.", "Aggiungi la prima spesa", "emptyAddBtn");
+      html += emptyStateHtml("Nessuna transazione registrata questo mese.", "Aggiungi la prima transazione", "emptyAddBtn");
     }
 
     el.innerHTML = html;
@@ -514,23 +595,27 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     var seeAllBtn = document.getElementById("seeAllBtn");
     if (seeAllBtn) seeAllBtn.addEventListener("click", function () { setView("list"); });
     var emptyAddBtn = document.getElementById("emptyAddBtn");
-    if (emptyAddBtn) emptyAddBtn.addEventListener("click", openAddExpenseSheet);
+    if (emptyAddBtn) emptyAddBtn.addEventListener("click", function () { openAddTransactionSheet("expense"); });
     wireTxRows(el);
   }
 
-  function txRowHtml(e) {
+  function txRowHtml(e, kind) {
+    kind = e._kind || kind || "expense";
+    var isIncome = kind === "income";
     var cat = catByslug(e.category);
-    return '<div class="tx-row" data-id="' + e.id + '">' +
+    return '<div class="tx-row" data-id="' + e.id + '" data-kind="' + kind + '">' +
       '<div class="tx-icon" style="background:' + cat.color + '">' + catInitial(e.category) + '</div>' +
       '<div class="tx-main"><div class="tx-title">' + (e.note ? escapeHtml(e.note) : cat.name) + '</div>' +
       '<div class="tx-sub">' + cat.name + ' · ' + formatShortDate(e.date) + '</div></div>' +
-      '<div class="tx-amount num">' + formatMoney(e.amount) + '</div></div>';
+      '<div class="tx-amount num' + (isIncome ? " income" : "") + '">' + (isIncome ? "+" : "") + formatMoney(e.amount) + '</div></div>';
   }
   function wireTxRows(container) {
     container.querySelectorAll(".tx-row").forEach(function (row) {
       row.addEventListener("click", function () {
-        var e = state.expenses.find(function (x) { return x.id === row.dataset.id; });
-        if (e) openExpenseDetail(e);
+        var kind = row.dataset.kind || "expense";
+        var list = kind === "income" ? state.incomes : state.expenses;
+        var e = list.find(function (x) { return x.id === row.dataset.id; });
+        if (e) openTransactionDetail(e, kind);
       });
     });
   }
@@ -545,19 +630,26 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
   /* ============================= LIST VIEW ============================= */
   function renderList() {
     var el = document.getElementById("view-list");
-    var monthExpenses = expensesForMonth(state.currentMonth);
-    var filtered = state.listFilter === "all" ? monthExpenses : monthExpenses.filter(function (e) { return e.category === state.listFilter; });
+    var kind = state.listType;
+    var isIncome = kind === "income";
+    var monthList = isIncome ? incomesForMonth(state.currentMonth) : expensesForMonth(state.currentMonth);
+    var filtered = state.listFilter === "all" ? monthList : monthList.filter(function (e) { return e.category === state.listFilter; });
+
+    var toggle = '<div class="type-toggle" id="listTypeToggle">' +
+      '<button class="type-toggle-btn' + (!isIncome ? " active" : "") + '" data-kind="expense">Uscite</button>' +
+      '<button class="type-toggle-btn' + (isIncome ? " active" : "") + '" data-kind="income">Entrate</button>' +
+      '</div>';
 
     var chips = '<div class="chip-row" id="listChips">' +
       '<div class="chip' + (state.listFilter === "all" ? " active" : "") + '" data-slug="all">Tutte</div>' +
-      getCategories().map(function (c) {
+      getCategories(kind).map(function (c) {
         return '<div class="chip' + (state.listFilter === c.slug ? " active" : "") + '" data-slug="' + c.slug + '">' +
           '<span class="cat-dot" style="background:' + c.color + '"></span>' + escapeHtml(c.name) + '</div>';
       }).join("") + '</div>';
 
     var body;
     if (!filtered.length) {
-      body = emptyStateHtml("Nessuna spesa da mostrare per questo filtro.", "Aggiungi una spesa", "listEmptyAddBtn");
+      body = emptyStateHtml("Nessuna " + (isIncome ? "entrata" : "spesa") + " da mostrare per questo filtro.", "Aggiungi " + (isIncome ? "un'entrata" : "una spesa"), "listEmptyAddBtn");
     } else {
       var byDay = {};
       var order = [];
@@ -568,50 +660,68 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
       order.sort().reverse();
       body = order.map(function (day) {
         return '<div class="day-heading">' + formatDayHeading(day) + '</div><div class="card">' +
-          byDay[day].map(txRowHtml).join("") + '</div>';
+          byDay[day].map(function (e) { return txRowHtml(e, kind); }).join("") + '</div>';
       }).join("");
     }
 
-    el.innerHTML = chips + body;
+    el.innerHTML = toggle + chips + body;
+    document.querySelectorAll("#listTypeToggle .type-toggle-btn").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        state.listType = btn.dataset.kind;
+        state.listFilter = "all";
+        renderList();
+      });
+    });
     document.querySelectorAll("#listChips .chip").forEach(function (chip) {
       chip.addEventListener("click", function () { state.listFilter = chip.dataset.slug; renderList(); });
     });
     var listEmptyAddBtn = document.getElementById("listEmptyAddBtn");
-    if (listEmptyAddBtn) listEmptyAddBtn.addEventListener("click", openAddExpenseSheet);
+    if (listEmptyAddBtn) listEmptyAddBtn.addEventListener("click", function () { openAddTransactionSheet(kind); });
     wireTxRows(el);
   }
 
   /* ============================= STATS VIEW ============================= */
+  function categoryBarsHtml(rows, total, emptyMessage) {
+    if (!rows.length) return emptyStateHtml(emptyMessage, null, null);
+    var max = rows[0].amount;
+    return '<div class="card">' + rows.map(function (x) {
+      var pct = max ? (x.amount / max * 100) : 0;
+      var share = total ? (x.amount / total * 100) : 0;
+      return '<div class="bar-chart-row">' +
+        '<div class="bar-chart-head"><span>' + x.cat.name + '</span><span class="num">' + formatMoney(x.amount) + '<span class="pct">' + share.toFixed(0) + '%</span></span></div>' +
+        '<div class="bar-track"><div class="bar-fill" style="width:' + pct + '%;background:' + x.cat.color + '"></div></div>' +
+        '</div>';
+    }).join("") + '</div>';
+  }
   function renderStats() {
     var el = document.getElementById("view-stats");
     var monthExpenses = expensesForMonth(state.currentMonth);
-    var bySlug = sumByCategory(monthExpenses);
-    var total = totalOf(monthExpenses);
-    var rows = getCategories().map(function (c) { return { cat: c, amount: bySlug[c.slug] || 0 }; })
-      .filter(function (x) { return x.amount > 0; })
-      .sort(function (a, b) { return b.amount - a.amount; });
-    var max = rows.length ? rows[0].amount : 0;
+    var monthIncomes = incomesForMonth(state.currentMonth);
+    var expenseTotal = totalOf(monthExpenses);
+    var incomeTotal = totalOf(monthIncomes);
+    var net = incomeTotal - expenseTotal;
 
-    var avgPerDay = total / daysInMonth(parseInt(state.currentMonth.slice(0, 4), 10), parseInt(state.currentMonth.slice(5, 7), 10));
+    var bySlugExpense = sumByCategory(monthExpenses);
+    var bySlugIncome = sumByCategory(monthIncomes);
+    var expenseRows = getCategories("expense").map(function (c) { return { cat: c, amount: bySlugExpense[c.slug] || 0 }; })
+      .filter(function (x) { return x.amount > 0; }).sort(function (a, b) { return b.amount - a.amount; });
+    var incomeRows = getCategories("income").map(function (c) { return { cat: c, amount: bySlugIncome[c.slug] || 0 }; })
+      .filter(function (x) { return x.amount > 0; }).sort(function (a, b) { return b.amount - a.amount; });
+
+    var avgPerDay = expenseTotal / daysInMonth(parseInt(state.currentMonth.slice(0, 4), 10), parseInt(state.currentMonth.slice(5, 7), 10));
 
     var html = '<div class="stat-tiles">' +
-      '<div class="stat-tile"><div class="stat-tile-label">Totale mese</div><div class="stat-tile-value num">' + formatMoney(total) + '</div></div>' +
-      '<div class="stat-tile"><div class="stat-tile-label">Media giornaliera</div><div class="stat-tile-value num">' + formatMoney(avgPerDay) + '</div></div>' +
+      '<div class="stat-tile"><div class="stat-tile-label">Entrate mese</div><div class="stat-tile-value num">' + formatMoney(incomeTotal) + '</div></div>' +
+      '<div class="stat-tile"><div class="stat-tile-label">Uscite mese</div><div class="stat-tile-value num">' + formatMoney(expenseTotal) + '</div></div>' +
+      '<div class="stat-tile"><div class="stat-tile-label">Saldo mese</div><div class="stat-tile-value num" style="color:' + (net < 0 ? "var(--critical)" : "var(--good)") + '">' + (net < 0 ? "−" : "") + formatMoney(Math.abs(net)) + '</div></div>' +
+      '<div class="stat-tile"><div class="stat-tile-label">Media/giorno (uscite)</div><div class="stat-tile-value num">' + formatMoney(avgPerDay) + '</div></div>' +
       '</div>';
 
-    html += '<div class="section-title">Per categoria</div>';
-    if (rows.length) {
-      html += '<div class="card">' + rows.map(function (x) {
-        var pct = max ? (x.amount / max * 100) : 0;
-        var share = total ? (x.amount / total * 100) : 0;
-        return '<div class="bar-chart-row">' +
-          '<div class="bar-chart-head"><span>' + x.cat.name + '</span><span class="num">' + formatMoney(x.amount) + '<span class="pct">' + share.toFixed(0) + '%</span></span></div>' +
-          '<div class="bar-track"><div class="bar-fill" style="width:' + pct + '%;background:' + x.cat.color + '"></div></div>' +
-          '</div>';
-      }).join("") + '</div>';
-    } else {
-      html += emptyStateHtml("Nessuna spesa in questo mese: niente da mostrare ancora.", null, null);
-    }
+    html += '<div class="section-title">Uscite per categoria</div>';
+    html += categoryBarsHtml(expenseRows, expenseTotal, "Nessuna spesa in questo mese: niente da mostrare ancora.");
+
+    html += '<div class="section-title">Entrate per categoria</div>';
+    html += categoryBarsHtml(incomeRows, incomeTotal, "Nessuna entrata in questo mese: niente da mostrare ancora.");
 
     html += '<div class="section-title">Andamento ultimi 6 mesi</div><div class="card trend-wrap" id="trendCard" style="position:relative"></div>';
 
@@ -622,8 +732,9 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
   function renderTrendChart(container) {
     var months = [];
     for (var i = 5; i >= 0; i--) months.push(addMonths(state.currentMonth, -i));
-    var totals = months.map(function (m) { return totalOf(expensesForMonth(m)); });
-    var max = Math.max.apply(null, totals.concat([1])) * 1.15;
+    var expenseTotals = months.map(function (m) { return totalOf(expensesForMonth(m)); });
+    var incomeTotals = months.map(function (m) { return totalOf(incomesForMonth(m)); });
+    var max = Math.max.apply(null, expenseTotals.concat(incomeTotals).concat([1])) * 1.15;
 
     var W = 300, H = 130, padL = 4, padR = 4, padT = 12, padB = 22;
     var innerW = W - padL - padR, innerH = H - padT - padB;
@@ -631,19 +742,23 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     function xAt(i) { return padL + i * stepX; }
     function yAt(v) { return padT + innerH - (v / max) * innerH; }
 
-    var points = totals.map(function (v, i) { return [xAt(i), yAt(v)]; });
-    var linePath = points.map(function (p, i) { return (i === 0 ? "M" : "L") + p[0].toFixed(1) + "," + p[1].toFixed(1); }).join(" ");
-    var areaPath = linePath + " L" + xAt(points.length - 1).toFixed(1) + "," + (padT + innerH) + " L" + xAt(0).toFixed(1) + "," + (padT + innerH) + " Z";
+    function buildSeries(totals, seriesKey, color) {
+      var points = totals.map(function (v, i) { return [xAt(i), yAt(v)]; });
+      var linePath = points.map(function (p, i) { return (i === 0 ? "M" : "L") + p[0].toFixed(1) + "," + p[1].toFixed(1); }).join(" ");
+      var markers = points.map(function (p, i) {
+        var isLast = i === points.length - 1;
+        var r = isLast ? 5 : 3.5;
+        return '<circle class="trend-pt" data-i="' + i + '" data-series="' + seriesKey + '" cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="' + r + '" fill="' + (isLast ? color : "var(--surface)") + '" stroke="' + color + '" stroke-width="2" style="cursor:pointer"/>';
+      }).join("");
+      return { linePath: linePath, markers: markers };
+    }
+
+    var expenseSeries = buildSeries(expenseTotals, "expense", "var(--critical)");
+    var incomeSeries = buildSeries(incomeTotals, "income", "var(--good)");
 
     var gridLines = [0.33, 0.66, 1].map(function (f) {
       var y = padT + innerH * (1 - f);
       return '<line x1="' + padL + '" y1="' + y.toFixed(1) + '" x2="' + (W - padR) + '" y2="' + y.toFixed(1) + '" stroke="var(--gridline)" stroke-width="1"/>';
-    }).join("");
-
-    var markers = points.map(function (p, i) {
-      var isLast = i === points.length - 1;
-      var r = isLast ? 5 : 3.5;
-      return '<circle class="trend-pt" data-i="' + i + '" cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="' + r + '" fill="' + (isLast ? "var(--accent)" : "var(--surface)") + '" stroke="var(--accent)" stroke-width="2" style="cursor:pointer"/>';
     }).join("");
 
     var labels = months.map(function (m, i) {
@@ -652,24 +767,25 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
       return '<text x="' + xAt(i).toFixed(1) + '" y="' + (H - 4) + '" font-size="9.5" fill="var(--ink-muted)" text-anchor="middle" font-family="var(--font-body)">' + lbl + '</text>';
     }).join("");
 
-    var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" aria-label="Andamento spesa negli ultimi sei mesi">' +
+    var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" aria-label="Andamento entrate e uscite negli ultimi sei mesi">' +
       gridLines +
-      '<defs><linearGradient id="trendGrad" x1="0" y1="0" x2="0" y2="1">' +
-        '<stop offset="0%" stop-color="var(--accent)" stop-opacity="0.22"/>' +
-        '<stop offset="100%" stop-color="var(--accent)" stop-opacity="0"/>' +
-      '</linearGradient></defs>' +
-      '<path d="' + areaPath + '" fill="url(#trendGrad)"/>' +
-      '<path d="' + linePath + '" fill="none" stroke="var(--accent)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>' +
-      markers +
+      '<path d="' + expenseSeries.linePath + '" fill="none" stroke="var(--critical)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>' +
+      '<path d="' + incomeSeries.linePath + '" fill="none" stroke="var(--good)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>' +
+      expenseSeries.markers + incomeSeries.markers +
       labels +
       '</svg>';
 
-    container.innerHTML = svg;
+    container.innerHTML =
+      '<div class="trend-legend"><span class="trend-legend-item"><span class="dot expense"></span>Uscite</span>' +
+      '<span class="trend-legend-item"><span class="dot income"></span>Entrate</span></div>' + svg;
+
     var tooltip = null;
     container.querySelectorAll(".trend-pt").forEach(function (pt) {
       pt.addEventListener("click", function () {
         if (tooltip) tooltip.remove();
         var i = parseInt(pt.dataset.i, 10);
+        var seriesKey = pt.dataset.series;
+        var value = seriesKey === "income" ? incomeTotals[i] : expenseTotals[i];
         var svgRect = container.querySelector("svg").getBoundingClientRect();
         var scaleX = svgRect.width / W;
         var scaleY = svgRect.height / H;
@@ -679,7 +795,7 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
         tooltip.className = "trend-tooltip";
         tooltip.style.left = cx + "px";
         tooltip.style.top = cy + "px";
-        tooltip.textContent = formatMonthLabel(months[i]).split(" ")[0].replace(/^\w/, function (c) { return c.toUpperCase(); }) + " · " + formatMoney(totals[i]);
+        tooltip.textContent = (seriesKey === "income" ? "Entrate " : "Uscite ") + formatMonthLabel(months[i]).split(" ")[0].replace(/^\w/, function (c) { return c.toUpperCase(); }) + " · " + formatMoney(value);
         container.appendChild(tooltip);
         setTimeout(function () { if (tooltip) { tooltip.remove(); tooltip = null; } }, 2200);
       });
@@ -693,7 +809,7 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     var bySlug = sumByCategory(monthExpenses);
 
     var html = '<p style="font-size:13px;color:var(--ink-secondary);margin-bottom:14px">Imposta un tetto di spesa mensile per categoria. Le modifiche si applicano da ' + formatMonthLabel(state.currentMonth) + ' in poi.</p>';
-    html += '<div class="card">' + getCategories().map(function (c) {
+    html += '<div class="card">' + getCategories("expense").map(function (c) {
       var limitVal = state.budgets[c.slug] || 0;
       var spent = bySlug[c.slug] || 0;
       var pct = limitVal > 0 ? spent / limitVal : 0;
@@ -759,39 +875,53 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     var today = todayISO();
     return state.recurring.filter(function (r) { return r.active && getNextDueDate(r) <= today; });
   }
+  function recurringKind(r){ return r.kind === "income" ? "income" : "expense"; }
+
+  function recurringSectionHtml(title, list, kind, addBtnId, emptyBtnId) {
+    var html = '<div class="section-title" style="display:flex;justify-content:space-between;align-items:center"><span>' + title + '</span>' +
+      '<button class="recurring-add-btn" id="' + addBtnId + '">+ Nuova</button></div>';
+    if (list.length) {
+      html += '<div class="card">' + list.map(function (r) {
+        var cat = catByslug(r.category);
+        var isIncome = kind === "income";
+        return '<div class="recurring-row" data-id="' + r.id + '">' +
+          '<span class="cat-dot" style="background:' + cat.color + '"></span>' +
+          '<div class="recurring-main"><div class="recurring-title">' + escapeHtml(r.name) + '</div>' +
+          '<div class="recurring-sub">' + (isIncome ? "+" : "") + formatMoney(r.amount) + ' · ' + frequencyLabel(r) + ' · ' + cat.name + '</div></div>' +
+          '<button class="switch' + (r.active ? " on" : "") + '" data-toggle="' + r.id + '" aria-label="Attiva o disattiva"></button>' +
+          '</div>';
+      }).join("") + '</div>';
+    } else {
+      html += emptyStateHtml(
+        kind === "income" ? "Nessuna entrata ricorrente configurata. Aggiungi lo stipendio o altre entrate fisse." : "Nessuna spesa ricorrente configurata. Aggiungi abbonamenti o bollette che si ripetono nel tempo.",
+        "Aggiungi ricorrente", emptyBtnId
+      );
+    }
+    return html;
+  }
+
   function renderRecurring() {
     var el = document.getElementById("view-recurring");
     var pending = getPendingRecurring();
+    var expenseRecurring = state.recurring.filter(function (r) { return recurringKind(r) === "expense"; });
+    var incomeRecurring = state.recurring.filter(function (r) { return recurringKind(r) === "income"; });
     var html = "";
 
     if (pending.length) {
-      html += '<div class="section-title">Da aggiungere questo mese</div><div class="card">' +
+      html += '<div class="section-title">Da aggiungere</div><div class="card">' +
         pending.map(function (r) {
           var cat = catByslug(r.category);
+          var isIncome = recurringKind(r) === "income";
           return '<div class="pending-item" data-id="' + r.id + '"><span class="cat-dot" style="background:' + cat.color + '"></span>' +
-            '<div class="tx-main"><div class="tx-title">' + escapeHtml(r.name) + '</div><div class="tx-sub">' + cat.name + ' · ' + formatMoney(r.amount) + '</div></div>' +
+            '<div class="tx-main"><div class="tx-title">' + escapeHtml(r.name) + '</div><div class="tx-sub">' + cat.name + ' · ' + (isIncome ? "+" : "") + formatMoney(r.amount) + '</div></div>' +
             '<button class="btn-small" data-apply="' + r.id + '">Aggiungi</button></div>';
         }).join("") +
         (pending.length > 1 ? '<button class="btn-ghost" id="applyAllBtn" style="margin-top:12px">Aggiungi tutte (' + pending.length + ')</button>' : "") +
         '</div>';
     }
 
-    html += '<div class="section-title" style="display:flex;justify-content:space-between;align-items:center"><span>Spese ricorrenti</span>' +
-      '<button class="recurring-add-btn" id="addRecurringBtn">+ Nuova</button></div>';
-
-    if (state.recurring.length) {
-      html += '<div class="card">' + state.recurring.map(function (r) {
-        var cat = catByslug(r.category);
-        return '<div class="recurring-row" data-id="' + r.id + '">' +
-          '<span class="cat-dot" style="background:' + cat.color + '"></span>' +
-          '<div class="recurring-main"><div class="recurring-title">' + escapeHtml(r.name) + '</div>' +
-          '<div class="recurring-sub">' + formatMoney(r.amount) + ' · ' + frequencyLabel(r) + ' · ' + cat.name + '</div></div>' +
-          '<button class="switch' + (r.active ? " on" : "") + '" data-toggle="' + r.id + '" aria-label="Attiva o disattiva"></button>' +
-          '</div>';
-      }).join("") + '</div>';
-    } else {
-      html += emptyStateHtml("Nessuna spesa ricorrente configurata. Aggiungi abbonamenti o bollette che si ripetono nel tempo.", "Aggiungi ricorrente", "recurringEmptyAddBtn");
-    }
+    html += recurringSectionHtml("Spese ricorrenti", expenseRecurring, "expense", "addRecurringExpBtn", "recurringEmptyAddBtnExpense");
+    html += recurringSectionHtml("Entrate ricorrenti", incomeRecurring, "income", "addRecurringIncBtn", "recurringEmptyAddBtnIncome");
 
     el.innerHTML = html;
 
@@ -815,10 +945,14 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
         if (r) openRecurringDetail(r);
       });
     });
-    var addRecurringBtn = document.getElementById("addRecurringBtn");
-    if (addRecurringBtn) addRecurringBtn.addEventListener("click", openAddRecurringSheet);
-    var recurringEmptyAddBtn = document.getElementById("recurringEmptyAddBtn");
-    if (recurringEmptyAddBtn) recurringEmptyAddBtn.addEventListener("click", openAddRecurringSheet);
+    var addRecurringExpBtn = document.getElementById("addRecurringExpBtn");
+    if (addRecurringExpBtn) addRecurringExpBtn.addEventListener("click", function () { openAddRecurringSheet("expense"); });
+    var addRecurringIncBtn = document.getElementById("addRecurringIncBtn");
+    if (addRecurringIncBtn) addRecurringIncBtn.addEventListener("click", function () { openAddRecurringSheet("income"); });
+    var recurringEmptyAddBtnExpense = document.getElementById("recurringEmptyAddBtnExpense");
+    if (recurringEmptyAddBtnExpense) recurringEmptyAddBtnExpense.addEventListener("click", function () { openAddRecurringSheet("expense"); });
+    var recurringEmptyAddBtnIncome = document.getElementById("recurringEmptyAddBtnIncome");
+    if (recurringEmptyAddBtnIncome) recurringEmptyAddBtnIncome.addEventListener("click", function () { openAddRecurringSheet("income"); });
   }
 
   function applyRecurring(id) {
@@ -827,15 +961,18 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     var dueDate = getNextDueDate(r);
     var unit = r.frequencyUnit || "month";
     var interval = parseInt(r.interval, 10) || 1;
-    dbAddExpense({
+    var kind = recurringKind(r);
+    var data = {
       amount: Number(r.amount) || 0,
       category: r.category,
       date: dueDate,
       note: r.name,
       recurringId: r.id,
       createdAt: new Date().toISOString()
-    });
+    };
+    if (kind === "income") dbAddIncome(data); else dbAddExpense(data);
     dbUpdateRecurring(r.id, {
+      kind: kind,
       frequencyUnit: unit,
       interval: interval,
       nextDueDate: advanceDate(dueDate, unit, interval)
@@ -843,11 +980,14 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     showToast("Aggiunta: " + r.name);
   }
 
-  function openAddRecurringSheet() {
-    var html = '<h3>Nuova spesa ricorrente</h3>' +
-      '<div class="field"><label for="recName">Nome</label><input type="text" id="recName" placeholder="Es. Abbonamento palestra" maxlength="80"></div>' +
+  function openAddRecurringSheet(kind) {
+    kind = kind || "expense";
+    var isIncome = kind === "income";
+    var defaultCat = isIncome ? "stipendio" : "abbonamenti";
+    var html = '<h3>' + (isIncome ? "Nuova entrata ricorrente" : "Nuova spesa ricorrente") + '</h3>' +
+      '<div class="field"><label for="recName">Nome</label><input type="text" id="recName" placeholder="' + (isIncome ? "Es. Stipendio" : "Es. Abbonamento palestra") + '" maxlength="80"></div>' +
       '<div class="field amount-field"><label for="recAmount">Importo</label><input type="number" id="recAmount" inputmode="decimal" step="0.01" min="0" placeholder="0,00"></div>' +
-      '<div class="field"><label>Categoria</label>' + categoryGridHtml("abbonamenti", "recCatGrid") + '</div>' +
+      '<div class="field"><label>Categoria</label>' + categoryGridHtml(defaultCat, "recCatGrid", kind) + '</div>' +
       '<div class="field"><label>Frequenza</label><div class="freq-row">' +
         '<div class="field"><input type="number" id="recInterval" min="1" max="99" value="1"></div>' +
         '<div class="field"><select id="recUnit">' +
@@ -859,8 +999,8 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
       '<div class="field"><label for="recNextDate">Prossima scadenza</label><input type="date" id="recNextDate" value="' + todayISO() + '"></div>' +
       '<button class="btn-primary" id="saveRecurringBtn">Salva</button>';
     openSheet(html);
-    var selectedCat = "abbonamenti";
-    wireCategoryGrid("recCatGrid", function (slug) { selectedCat = slug; });
+    var selectedCat = defaultCat;
+    wireCategoryGrid("recCatGrid", function (slug) { selectedCat = slug; }, kind);
 
     var intervalInput = document.getElementById("recInterval");
     var unitSelect = document.getElementById("recUnit");
@@ -889,18 +1029,22 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
         frequencyUnit: unit,
         interval: interval,
         nextDueDate: nextDate,
-        active: true
+        active: true,
+        kind: kind
       });
       closeSheet();
-      showToast("Spesa ricorrente salvata");
+      showToast(isIncome ? "Entrata ricorrente salvata" : "Spesa ricorrente salvata");
     });
   }
 
   function openRecurringDetail(r) {
+    var kind = recurringKind(r);
+    var isIncome = kind === "income";
     var cat = catByslug(r.category);
     var html = '<h3 style="text-align:center">' + escapeHtml(r.name) + '</h3>' +
-      '<div class="detail-amount">' + formatMoney(r.amount) + '</div>' +
+      '<div class="detail-amount' + (isIncome ? " income" : "") + '">' + (isIncome ? "+" : "") + formatMoney(r.amount) + '</div>' +
       '<div class="detail-cat"><span class="cat-dot" style="display:inline-block;background:' + cat.color + ';margin-right:6px;vertical-align:middle"></span>' + cat.name + '</div>' +
+      '<div class="detail-row"><span>Tipo</span><span>' + (isIncome ? "Entrata" : "Spesa") + '</span></div>' +
       '<div class="detail-row"><span>Frequenza</span><span>' + frequencyLabel(r) + '</span></div>' +
       '<div class="detail-row"><span>Stato</span><span>' + (r.active ? "Attiva" : "In pausa") + '</span></div>' +
       '<div class="detail-row"><span>Prossima scadenza</span><span>' + formatShortDate(getNextDueDate(r)) + '</span></div>' +

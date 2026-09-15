@@ -25,6 +25,13 @@
   --cat-abbonamenti:  #4a3aa7;
   --cat-altro:        #e34948;
 
+  --inc-stipendio:    #1baf7a;
+  --inc-freelance:    #0aa5a8;
+  --inc-regali:       #d9a520;
+  --inc-rimborsi:     #6a8caf;
+  --inc-investimenti: #4a3aa7;
+  --inc-altro:        #7a7a7a;
+
   --good:             #0ca30c;
   --warning:          #fab219;
   --serious:          #ec835a;
@@ -67,6 +74,13 @@
     --cat-abbonamenti:  #9085e9;
     --cat-altro:        #e66767;
 
+    --inc-stipendio:    #22c48a;
+    --inc-freelance:    #1ec1c4;
+    --inc-regali:       #e6bb42;
+    --inc-rimborsi:     #8fb2d6;
+    --inc-investimenti: #9085e9;
+    --inc-altro:        #a0a0a0;
+
     --shadow-raised: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.35);
     --shadow-sheet: 0 -8px 32px rgba(0,0,0,0.5);
   }
@@ -96,6 +110,13 @@
   --cat-shopping:     #008300;
   --cat-abbonamenti:  #9085e9;
   --cat-altro:        #e66767;
+
+  --inc-stipendio:    #22c48a;
+  --inc-freelance:    #1ec1c4;
+  --inc-regali:       #e6bb42;
+  --inc-rimborsi:     #8fb2d6;
+  --inc-investimenti: #9085e9;
+  --inc-altro:        #a0a0a0;
 
   --shadow-raised: 0 1px 2px rgba(0,0,0,0.3), 0 8px 24px rgba(0,0,0,0.35);
   --shadow-sheet: 0 -8px 32px rgba(0,0,0,0.5);
@@ -293,6 +314,14 @@ nav.tabbar{
 }
 .hero-label{ font-size: 13px; color: var(--ink-secondary); font-weight: 500; margin-bottom: 6px; }
 .hero-sub{ font-size: 13px; color: var(--ink-secondary); margin-top: 8px; }
+.hero-amount.positive{ color: var(--good); }
+.hero-amount.negative{ color: var(--critical); }
+.hero-split{ display:flex; gap:18px; margin-top:10px; }
+.hero-split-item{ display:flex; align-items:center; gap:6px; font-size:12.5px; color: var(--ink-secondary); }
+.hero-split-item b{ color: var(--ink); font-weight:700; }
+.hero-split-dot{ width:8px; height:8px; border-radius:50%; flex-shrink:0; }
+.hero-split-item.income .hero-split-dot{ background: var(--good); }
+.hero-split-item.expense .hero-split-dot{ background: var(--critical); }
 
 .meter-track{
   height: 8px;
@@ -350,6 +379,7 @@ nav.tabbar{
 .tx-title{ font-size:14px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .tx-sub{ font-size:12px; color: var(--ink-muted); margin-top:1px; }
 .tx-amount{ font-size:14.5px; font-weight:600; font-family: var(--font-mono); font-variant-numeric: tabular-nums; white-space:nowrap; }
+.tx-amount.income{ color: var(--good); }
 
 .day-heading{
   font-size: 12px; font-weight: 700; color: var(--ink-muted);
@@ -357,6 +387,13 @@ nav.tabbar{
   margin: 18px 2px 6px;
 }
 .day-heading:first-child{ margin-top: 0; }
+
+.type-toggle{ display:flex; background: var(--gridline); border-radius:12px; padding:3px; gap:3px; margin-bottom:12px; }
+.type-toggle-btn{
+  flex:1; border:none; background:transparent; padding:9px; border-radius:9px;
+  font-size:13px; font-weight:600; color: var(--ink-secondary); cursor:pointer;
+}
+.type-toggle-btn.active{ background: var(--surface-raised); color: var(--ink); box-shadow: var(--shadow-raised); }
 
 .chip-row{ display:flex; gap:8px; overflow-x:auto; padding: 2px 2px 12px; margin: 0 -2px; }
 .chip-row::-webkit-scrollbar{ display:none; }
@@ -388,6 +425,11 @@ nav.tabbar{
 
 .trend-wrap{ margin-top: 4px; }
 .trend-wrap svg{ width:100%; height:auto; display:block; overflow:visible; }
+.trend-legend{ display:flex; gap:14px; font-size:11.5px; font-weight:600; color: var(--ink-secondary); margin-bottom:10px; }
+.trend-legend-item{ display:flex; align-items:center; gap:5px; }
+.trend-legend-item .dot{ width:8px; height:8px; border-radius:50%; }
+.trend-legend-item .dot.expense{ background: var(--critical); }
+.trend-legend-item .dot.income{ background: var(--good); }
 .trend-tooltip{
   position:absolute; pointer-events:none; background: var(--ink); color: var(--page);
   font-size:11.5px; font-weight:600; padding:5px 9px; border-radius:8px; white-space:nowrap;
@@ -521,6 +563,7 @@ nav.tabbar{
 }
 
 .detail-amount{ font-family: var(--font-mono); font-size:30px; font-weight:600; text-align:center; margin: 4px 0 4px; }
+.detail-amount.income{ color: var(--good); }
 .detail-cat{ text-align:center; font-size:13px; color: var(--ink-secondary); font-weight:600; margin-bottom:18px; }
 .detail-row{ display:flex; justify-content:space-between; padding:10px 0; font-size:13.5px; }
 .detail-row + .detail-row{ border-top:1px solid var(--border); }

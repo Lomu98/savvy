@@ -1,6 +1,6 @@
 # Savvy
 
-App personale per tracciare spese, impostare budget mensili per categoria, gestire spese ricorrenti e vedere l'andamento nel tempo. È una PWA installabile sul telefono, con i dati sincronizzati in tempo reale su tutti i tuoi dispositivi tramite Firebase.
+App personale per tracciare entrate e spese, impostare budget mensili per categoria, gestire movimenti ricorrenti e vedere il saldo nel tempo. È una PWA installabile sul telefono, con i dati sincronizzati in tempo reale su tutti i tuoi dispositivi tramite Firebase.
 
 Nessun framework, nessuna build: HTML, CSS e JavaScript puri (ES modules). Il backend è Firebase (Authentication con Google Sign-In + Firestore come database).
 
@@ -115,7 +115,8 @@ Da questo momento l'icona sulla home apre l'app in una finestra a schermo intero
 
 ## Personalizzazione
 
-- **Categorie**: quelle di base sono nell'array `DEFAULT_CATEGORIES` in `app.js` (badge colore, nome, slug), con colori da variabili CSS in `styles.css` (`--cat-*`) coordinate tra chiaro e scuro. Puoi anche crearne di nuove direttamente dall'app (tocca "+ Nuova" nel selettore categoria durante l'aggiunta di una spesa): vengono salvate in Firestore sotto `users/{uid}/categories` con un colore libero, non serve toccare il codice.
-- **Spese ricorrenti**: supportano una cadenza a scelta (ogni N settimane, mesi o anni) e una data di prossima scadenza; quando ne aggiungi una viene proposta finché non la confermi, poi la scadenza avanza automaticamente della cadenza impostata.
+- **Entrate e uscite**: la vista "Movimenti" ha un toggle Uscite/Entrate; la Home mostra il saldo netto del mese (entrate meno uscite) e le Statistiche confrontano l'andamento delle due negli ultimi 6 mesi.
+- **Categorie**: quelle di base sono negli array `DEFAULT_EXPENSE_CATEGORIES` / `DEFAULT_INCOME_CATEGORIES` in `app.js` (badge colore, nome, slug), con colori da variabili CSS in `styles.css` (`--cat-*` / `--inc-*`) coordinate tra chiaro e scuro. Puoi anche crearne di nuove direttamente dall'app (tocca "+ Nuova" nel selettore categoria): vengono salvate in Firestore sotto `users/{uid}/categories` con un colore libero, non serve toccare il codice.
+- **Movimenti ricorrenti**: sia spese che entrate (es. stipendio) supportano una cadenza a scelta (ogni N settimane, mesi o anni) e una data di prossima scadenza; quando ne aggiungi uno viene proposto finché non lo confermi, poi la scadenza avanza automaticamente della cadenza impostata.
 - **Soglie di avviso budget**: funzione `statusForPct` in `app.js` (attualmente: verde sotto l'80%, giallo all'80–99%, rosso dal 100%).
 - **Tema**: la app segue automaticamente il tema chiaro/scuro del sistema operativo (`prefers-color-scheme`).

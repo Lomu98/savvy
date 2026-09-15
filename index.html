@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Savvy</title>
-  <meta name="description" content="App per tracciare spese, budget mensili e spese ricorrenti.">
+  <meta name="description" content="App per tracciare entrate e spese, budget mensili e movimenti ricorrenti.">
 
   <link rel="manifest" href="manifest.json">
   <link rel="apple-touch-icon" href="apple-touch-icon.png">
@@ -25,7 +25,7 @@
   <div class="auth-screen" id="authScreen">
     <img class="auth-logo" src="icon-192.png" alt="">
     <h1>Savvy</h1>
-    <p>Traccia le tue spese, imposta budget mensili e gestisci le spese ricorrenti. Accedi per sincronizzare i dati su tutti i tuoi dispositivi.</p>
+    <p>Traccia entrate e spese, imposta budget mensili e gestisci i movimenti ricorrenti. Accedi per sincronizzare i dati su tutti i tuoi dispositivi.</p>
     <button class="google-btn" id="googleSignInBtn">
       <svg viewBox="0 0 48 48"><path fill="#FFC107" d="M43.6 20.5H42V20H24v8h11.3c-1.6 4.7-6.1 8-11.3 8-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.6 6.1 29.6 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.7-.4-3.5z"/><path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.6 15.9 18.9 13 24 13c3.1 0 5.9 1.2 8 3.1l5.7-5.7C34.6 6.1 29.6 4 24 4 16.2 4 9.5 8.4 6.3 14.7z"/><path fill="#4CAF50" d="M24 44c5.5 0 10.4-1.9 14.3-5.1l-6.6-5.6C29.6 35.1 26.9 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.6 5.1C9.4 39.6 16.1 44 24 44z"/><path fill="#1976D2" d="M43.6 20.5H42V20H24v8h11.3c-.8 2.3-2.2 4.2-4.1 5.6l6.6 5.6C41.5 36 44 30.5 44 24c0-1.3-.1-2.7-.4-3.5z"/></svg>
       Accedi con Google
@@ -58,16 +58,16 @@
       <section class="view" id="view-recurring"></section>
     </main>
 
-    <button class="fab" id="fabAdd" aria-label="Aggiungi spesa">+</button>
+    <button class="fab" id="fabAdd" aria-label="Aggiungi">+</button>
 
     <nav class="tabbar">
       <button class="tab-btn" data-view="home" aria-label="Home">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11.5 12 4l9 7.5"/><path d="M5 10v9.5a1 1 0 0 0 1 1h4v-6h4v6h4a1 1 0 0 0 1-1V10"/></svg>
         Home
       </button>
-      <button class="tab-btn" data-view="list" aria-label="Spese">
+      <button class="tab-btn" data-view="list" aria-label="Movimenti">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 6h16M4 12h16M4 18h10"/></svg>
-        Spese
+        Movimenti
       </button>
       <button class="tab-btn" data-view="stats" aria-label="Statistiche">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10M12 20V4M20 20v-7"/></svg>
