@@ -115,6 +115,7 @@ Da questo momento l'icona sulla home apre l'app in una finestra a schermo intero
 
 ## Personalizzazione
 
-- **Categorie**: modifica l'array `CATEGORIES` in `app.js` (badge colore, nome, slug). I colori sono variabili CSS definite in `styles.css` (`--cat-*`), coordinate tra chiaro e scuro.
+- **Categorie**: quelle di base sono nell'array `DEFAULT_CATEGORIES` in `app.js` (badge colore, nome, slug), con colori da variabili CSS in `styles.css` (`--cat-*`) coordinate tra chiaro e scuro. Puoi anche crearne di nuove direttamente dall'app (tocca "+ Nuova" nel selettore categoria durante l'aggiunta di una spesa): vengono salvate in Firestore sotto `users/{uid}/categories` con un colore libero, non serve toccare il codice.
+- **Spese ricorrenti**: supportano una cadenza a scelta (ogni N settimane, mesi o anni) e una data di prossima scadenza; quando ne aggiungi una viene proposta finché non la confermi, poi la scadenza avanza automaticamente della cadenza impostata.
 - **Soglie di avviso budget**: funzione `statusForPct` in `app.js` (attualmente: verde sotto l'80%, giallo all'80–99%, rosso dal 100%).
 - **Tema**: la app segue automaticamente il tema chiaro/scuro del sistema operativo (`prefers-color-scheme`).

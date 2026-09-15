@@ -18,24 +18,36 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
   "use strict";
 
   /* ============================= DATA ============================= */
-  var CATEGORIES = [
-    { slug: "alimentari",  name: "Alimentari",      var: "--cat-alimentari" },
-    { slug: "trasporti",   name: "Trasporti",       var: "--cat-trasporti" },
-    { slug: "casa",        name: "Casa e bollette", var: "--cat-casa" },
-    { slug: "svago",       name: "Svago",           var: "--cat-svago" },
-    { slug: "salute",      name: "Salute",          var: "--cat-salute" },
-    { slug: "shopping",    name: "Shopping",        var: "--cat-shopping" },
-    { slug: "abbonamenti", name: "Abbonamenti",     var: "--cat-abbonamenti" },
-    { slug: "altro",       name: "Altro",           var: "--cat-altro" }
+  var DEFAULT_CATEGORIES = [
+    { slug: "alimentari",  name: "Alimentari",      color: "var(--cat-alimentari)" },
+    { slug: "trasporti",   name: "Trasporti",       color: "var(--cat-trasporti)" },
+    { slug: "casa",        name: "Casa e bollette", color: "var(--cat-casa)" },
+    { slug: "svago",       name: "Svago",           color: "var(--cat-svago)" },
+    { slug: "salute",      name: "Salute",          color: "var(--cat-salute)" },
+    { slug: "shopping",    name: "Shopping",        color: "var(--cat-shopping)" },
+    { slug: "abbonamenti", name: "Abbonamenti",     color: "var(--cat-abbonamenti)" },
+    { slug: "altro",       name: "Altro",           color: "var(--cat-altro)" }
   ];
-  function catByslug(slug){ return CATEGORIES.find(function(c){ return c.slug === slug; }) || CATEGORIES[CATEGORIES.length-1]; }
+  function getCategories(){ return DEFAULT_CATEGORIES.concat(state.customCategories); }
+  function catByslug(slug){ return getCategories().find(function(c){ return c.slug === slug; }) || DEFAULT_CATEGORIES[DEFAULT_CATEGORIES.length-1]; }
   function catInitial(slug){ return catByslug(slug).name.charAt(0).toUpperCase(); }
+  function slugify(s){
+    return s.toLowerCase().normalize("NFD").replace(/[̀-ͯ]/g, "")
+      .replace(/[^a-z0-9]+/g, "-").replace(/(^-+|-+$)/g, "") || "categoria";
+  }
+  function uniqueCategorySlug(name){
+    var base = slugify(name), slug = base, n = 2;
+    var existing = getCategories();
+    while (existing.some(function(c){ return c.slug === slug; })) { slug = base + "-" + n; n++; }
+    return slug;
+  }
 
   /* ============================= STATE ============================= */
   var state = {
     expenses: [],
     budgets: {},
     recurring: [],
+    customCategories: [],
     currentMonth: monthKeyFromDate(new Date()),
     currentView: "home",
     listFilter: "all"
@@ -111,7 +123,7 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
   }
 
   var currentUser = null;
-  var unsubExpenses = null, unsubBudgets = null, unsubRecurring = null;
+  var unsubExpenses = null, unsubBudgets = null, unsubRecurring = null, unsubCategories = null;
 
   function userCollection(name){ return collection(dbFs, "users", currentUser.uid, name); }
   function userDoc(name, id){ return doc(dbFs, "users", currentUser.uid, name, id); }
@@ -197,14 +209,22 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
         state.recurring = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
         renderCurrentView();
       }, function () {});
+
+      unsubCategories = onSnapshot(userCollection("categories"), function (snap) {
+        state.customCategories = snap.docs.map(function (d) {
+          return { slug: d.id, name: d.data().name, color: d.data().color, custom: true };
+        });
+        renderCurrentView();
+      }, function () {});
     } catch (e) { /* connectivity banner covers this */ }
   }
   function unsubscribeAll() {
     if (unsubExpenses) unsubExpenses();
     if (unsubBudgets) unsubBudgets();
     if (unsubRecurring) unsubRecurring();
-    unsubExpenses = unsubBudgets = unsubRecurring = null;
-    state.expenses = []; state.budgets = {}; state.recurring = [];
+    if (unsubCategories) unsubCategories();
+    unsubExpenses = unsubBudgets = unsubRecurring = unsubCategories = null;
+    state.expenses = []; state.budgets = {}; state.recurring = []; state.customCategories = [];
   }
 
   function dbAddExpense(data) {
@@ -224,6 +244,9 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
   }
   function dbDeleteRecurring(id) {
     return deleteDoc(userDoc("recurring", id)).catch(function () { showToast("Eliminazione non riuscita."); });
+  }
+  function dbAddCategory(slug, name, color) {
+    return setDoc(userDoc("categories", slug), { name: name, color: color }).catch(function () { showToast("Categoria non salvata."); });
   }
 
   /* ============================= CONNECTIVITY BANNER ============================= */
@@ -298,25 +321,72 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
   }
 
   /* ============================= CATEGORY PICKER (shared) ============================= */
+  var CATEGORY_COLOR_PALETTE = ["#2a78d6","#eb6834","#1baf7a","#eda100","#e87ba4","#008300","#4a3aa7","#e34948","#0aa5a8","#b5539a"];
+  function randomCategoryColor(){ return CATEGORY_COLOR_PALETTE[Math.floor(Math.random() * CATEGORY_COLOR_PALETTE.length)]; }
+
   function categoryGridHtml(selectedSlug, name) {
-    return '<div class="cat-grid" id="' + name + '">' + CATEGORIES.map(function (c) {
+    var grid = '<div class="cat-grid" id="' + name + '">' + getCategories().map(function (c) {
       return '<div class="cat-opt' + (c.slug === selectedSlug ? " selected" : "") + '" data-slug="' + c.slug + '">' +
-        '<span class="cat-dot" style="background:var(' + c.var + ')"></span><span>' + c.name + '</span></div>';
-    }).join("") + '</div>';
+        '<span class="cat-dot" style="background:' + c.color + '"></span><span>' + escapeHtml(c.name) + '</span></div>';
+    }).join("") +
+      '<div class="cat-opt cat-opt-add" data-slug="__add__"><span class="cat-dot-add">+</span><span>Nuova</span></div>' +
+      '</div>';
+    var form = '<div class="new-cat-form" id="' + name + 'NewCat" hidden>' +
+      '<div class="new-cat-form-row">' +
+        '<input type="text" class="new-cat-name" placeholder="Nome categoria" maxlength="30">' +
+        '<input type="color" class="new-cat-color" value="' + randomCategoryColor() + '" aria-label="Colore categoria">' +
+      '</div>' +
+      '<div class="new-cat-actions">' +
+        '<button type="button" class="btn-ghost new-cat-cancel">Annulla</button>' +
+        '<button type="button" class="btn-primary new-cat-save">Crea</button>' +
+      '</div></div>';
+    return grid + form;
   }
   function wireCategoryGrid(gridId, onSelect) {
     var grid = document.getElementById(gridId);
-    grid.querySelectorAll(".cat-opt").forEach(function (opt) {
-      opt.addEventListener("click", function () {
-        grid.querySelectorAll(".cat-opt").forEach(function (o) { o.classList.remove("selected"); });
-        opt.classList.add("selected");
-        onSelect(opt.dataset.slug);
-      });
+    var form = document.getElementById(gridId + "NewCat");
+
+    function selectOpt(opt) {
+      grid.querySelectorAll(".cat-opt").forEach(function (o) { o.classList.remove("selected"); });
+      opt.classList.add("selected");
+      onSelect(opt.dataset.slug);
+    }
+    function wireOpt(opt) {
+      opt.addEventListener("click", function () { selectOpt(opt); });
+    }
+    grid.querySelectorAll(".cat-opt[data-slug]:not(.cat-opt-add)").forEach(wireOpt);
+
+    var addOpt = grid.querySelector(".cat-opt-add");
+    addOpt.addEventListener("click", function () {
+      form.hidden = false;
+      form.querySelector(".new-cat-name").focus();
+    });
+    form.querySelector(".new-cat-cancel").addEventListener("click", function () { form.hidden = true; });
+    form.querySelector(".new-cat-save").addEventListener("click", function () {
+      var name = form.querySelector(".new-cat-name").value.trim();
+      var color = form.querySelector(".new-cat-color").value;
+      if (!name) { showToast("Inserisci un nome per la categoria."); return; }
+      var slug = uniqueCategorySlug(name);
+      var newCat = { slug: slug, name: name, color: color, custom: true };
+      state.customCategories.push(newCat);
+      dbAddCategory(slug, name, color);
+
+      var tile = document.createElement("div");
+      tile.className = "cat-opt";
+      tile.dataset.slug = slug;
+      tile.innerHTML = '<span class="cat-dot" style="background:' + color + '"></span><span>' + escapeHtml(name) + '</span>';
+      grid.insertBefore(tile, addOpt);
+      wireOpt(tile);
+      selectOpt(tile);
+
+      form.hidden = true;
+      form.querySelector(".new-cat-name").value = "";
+      showToast("Categoria creata");
     });
   }
 
   /* ============================= ADD EXPENSE SHEET ============================= */
-  var lastUsedCategory = CATEGORIES[0].slug;
+  var lastUsedCategory = DEFAULT_CATEGORIES[0].slug;
   function openAddExpenseSheet() {
     var html =
       '<h3>Nuova spesa</h3>' +
@@ -354,7 +424,7 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     var html =
       '<h3 style="text-align:center">Dettaglio spesa</h3>' +
       '<div class="detail-amount">' + formatMoney(expense.amount) + '</div>' +
-      '<div class="detail-cat"><span class="cat-dot" style="display:inline-block;background:var(' + cat.var + ');margin-right:6px;vertical-align:middle"></span>' + cat.name + '</div>' +
+      '<div class="detail-cat"><span class="cat-dot" style="display:inline-block;background:' + cat.color + ';margin-right:6px;vertical-align:middle"></span>' + cat.name + '</div>' +
       '<div class="detail-row"><span>Data</span><span>' + formatDayHeading(expense.date) + '</span></div>' +
       (expense.note ? '<div class="detail-row"><span>Nota</span><span>' + escapeHtml(expense.note) + '</span></div>' : '') +
       (expense.recurringId ? '<div class="detail-row"><span>Origine</span><span>Spesa ricorrente</span></div>' : '') +
@@ -402,19 +472,19 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     html += '</div>';
 
     if (pendingRecurring.length) {
-      html += '<div class="banner-cta"><p><strong>' + pendingRecurring.length + '</strong> ' + (pendingRecurring.length === 1 ? "spesa ricorrente" : "spese ricorrenti") + ' da aggiungere questo mese.</p>' +
+      html += '<div class="banner-cta"><p><strong>' + pendingRecurring.length + '</strong> ' + (pendingRecurring.length === 1 ? "spesa ricorrente" : "spese ricorrenti") + ' da aggiungere.</p>' +
         '<button id="goRecurringBanner">Gestisci</button></div>';
     }
 
     var bySlug = sumByCategory(monthExpenses);
-    var topCats = CATEGORIES.map(function (c) { return { cat: c, amount: bySlug[c.slug] || 0 }; })
+    var topCats = getCategories().map(function (c) { return { cat: c, amount: bySlug[c.slug] || 0 }; })
       .filter(function (x) { return x.amount > 0; })
       .sort(function (a, b) { return b.amount - a.amount; })
       .slice(0, 3);
     if (topCats.length) {
       html += '<div class="section-title">Categorie principali</div><div class="card">' +
         topCats.map(function (x) {
-          return '<div class="mini-cat-row"><span class="cat-dot" style="background:var(' + x.cat.var + ')"></span>' +
+          return '<div class="mini-cat-row"><span class="cat-dot" style="background:' + x.cat.color + '"></span>' +
             '<span class="mini-cat-name">' + x.cat.name + '</span><span class="mini-cat-amount num">' + formatMoney(x.amount) + '</span></div>';
         }).join("") + '</div>';
     }
@@ -444,7 +514,7 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
   function txRowHtml(e) {
     var cat = catByslug(e.category);
     return '<div class="tx-row" data-id="' + e.id + '">' +
-      '<div class="tx-icon" style="background:var(' + cat.var + ')">' + catInitial(e.category) + '</div>' +
+      '<div class="tx-icon" style="background:' + cat.color + '">' + catInitial(e.category) + '</div>' +
       '<div class="tx-main"><div class="tx-title">' + (e.note ? escapeHtml(e.note) : cat.name) + '</div>' +
       '<div class="tx-sub">' + cat.name + ' · ' + formatShortDate(e.date) + '</div></div>' +
       '<div class="tx-amount num">' + formatMoney(e.amount) + '</div></div>';
@@ -473,9 +543,9 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
 
     var chips = '<div class="chip-row" id="listChips">' +
       '<div class="chip' + (state.listFilter === "all" ? " active" : "") + '" data-slug="all">Tutte</div>' +
-      CATEGORIES.map(function (c) {
+      getCategories().map(function (c) {
         return '<div class="chip' + (state.listFilter === c.slug ? " active" : "") + '" data-slug="' + c.slug + '">' +
-          '<span class="cat-dot" style="background:var(' + c.var + ')"></span>' + c.name + '</div>';
+          '<span class="cat-dot" style="background:' + c.color + '"></span>' + escapeHtml(c.name) + '</div>';
       }).join("") + '</div>';
 
     var body;
@@ -510,7 +580,7 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     var monthExpenses = expensesForMonth(state.currentMonth);
     var bySlug = sumByCategory(monthExpenses);
     var total = totalOf(monthExpenses);
-    var rows = CATEGORIES.map(function (c) { return { cat: c, amount: bySlug[c.slug] || 0 }; })
+    var rows = getCategories().map(function (c) { return { cat: c, amount: bySlug[c.slug] || 0 }; })
       .filter(function (x) { return x.amount > 0; })
       .sort(function (a, b) { return b.amount - a.amount; });
     var max = rows.length ? rows[0].amount : 0;
@@ -529,7 +599,7 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
         var share = total ? (x.amount / total * 100) : 0;
         return '<div class="bar-chart-row">' +
           '<div class="bar-chart-head"><span>' + x.cat.name + '</span><span class="num">' + formatMoney(x.amount) + '<span class="pct">' + share.toFixed(0) + '%</span></span></div>' +
-          '<div class="bar-track"><div class="bar-fill" style="width:' + pct + '%;background:var(' + x.cat.var + ')"></div></div>' +
+          '<div class="bar-track"><div class="bar-fill" style="width:' + pct + '%;background:' + x.cat.color + '"></div></div>' +
           '</div>';
       }).join("") + '</div>';
     } else {
@@ -616,14 +686,14 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     var bySlug = sumByCategory(monthExpenses);
 
     var html = '<p style="font-size:13px;color:var(--ink-secondary);margin-bottom:14px">Imposta un tetto di spesa mensile per categoria. Le modifiche si applicano da ' + formatMonthLabel(state.currentMonth) + ' in poi.</p>';
-    html += '<div class="card">' + CATEGORIES.map(function (c) {
+    html += '<div class="card">' + getCategories().map(function (c) {
       var limitVal = state.budgets[c.slug] || 0;
       var spent = bySlug[c.slug] || 0;
       var pct = limitVal > 0 ? spent / limitVal : 0;
       var status = limitVal > 0 ? statusForPct(pct) : null;
       return '<div class="budget-row" data-slug="' + c.slug + '">' +
-        '<div class="budget-row-head"><span class="cat-dot" style="background:var(' + c.var + ')"></span>' +
-        '<span class="mini-cat-name">' + c.name + '</span></div>' +
+        '<div class="budget-row-head"><span class="cat-dot" style="background:' + c.color + '"></span>' +
+        '<span class="mini-cat-name">' + escapeHtml(c.name) + '</span></div>' +
         '<div class="budget-input-wrap"><span>€</span><input type="number" class="budget-input" min="0" step="1" value="' + (limitVal || "") + '" placeholder="0" data-slug="' + c.slug + '"></div>' +
         (limitVal > 0 ?
           ('<div class="meter-track"><div class="meter-fill ' + status + '" style="width:' + Math.min(100, pct * 100) + '%"></div></div>' +
@@ -644,9 +714,43 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
   }
 
   /* ============================= RECURRING VIEW ============================= */
+  var FREQ_UNIT_LABELS = { week: ["settimana", "settimane"], month: ["mese", "mesi"], year: ["anno", "anni"] };
+  function frequencyLabel(r) {
+    var n = parseInt(r.interval, 10) || 1;
+    var words = FREQ_UNIT_LABELS[r.frequencyUnit] || FREQ_UNIT_LABELS.month;
+    return n === 1 ? "ogni " + words[0] : "ogni " + n + " " + words[1];
+  }
+  // Sposta una data ISO avanti di `interval` unità (settimana/mese/anno),
+  // mantenendo il giorno del mese quando possibile (es. 31 gen + 1 mese -> 28/29 feb).
+  function advanceDate(iso, unit, interval) {
+    var parts = iso.split("-").map(function (n) { return parseInt(n, 10); });
+    var y = parts[0], m = parts[1], d = parts[2];
+    if (unit === "week") {
+      var dt = new Date(y, m - 1, d + 7 * interval);
+      return dt.getFullYear() + "-" + pad2(dt.getMonth() + 1) + "-" + pad2(dt.getDate());
+    }
+    if (unit === "year") {
+      var ny = y + interval;
+      return ny + "-" + pad2(m) + "-" + pad2(Math.min(d, daysInMonth(ny, m)));
+    }
+    var totalMonths = (m - 1) + interval;
+    var newY = y + Math.floor(totalMonths / 12);
+    var newM = (totalMonths % 12) + 1;
+    return newY + "-" + pad2(newM) + "-" + pad2(Math.min(d, daysInMonth(newY, newM)));
+  }
+  // Ricorrenti create prima dell'introduzione delle frequenze flessibili
+  // avevano solo `dayOfMonth` + `lastAppliedMonth`: qui si deriva la prossima
+  // scadenza per quei documenti finché non vengono migrati al primo utilizzo.
+  function getNextDueDate(r) {
+    if (r.nextDueDate) return r.nextDueDate;
+    var day = parseInt(r.dayOfMonth, 10) || 1;
+    var base = r.lastAppliedMonth ? addMonths(r.lastAppliedMonth, 1) : monthKeyFromDate(new Date());
+    var y = parseInt(base.slice(0, 4), 10), m = parseInt(base.slice(5, 7), 10);
+    return base + "-" + pad2(Math.min(day, daysInMonth(y, m)));
+  }
   function getPendingRecurring() {
-    var thisMonth = monthKeyFromDate(new Date());
-    return state.recurring.filter(function (r) { return r.active && r.lastAppliedMonth !== thisMonth; });
+    var today = todayISO();
+    return state.recurring.filter(function (r) { return r.active && getNextDueDate(r) <= today; });
   }
   function renderRecurring() {
     var el = document.getElementById("view-recurring");
@@ -657,7 +761,7 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
       html += '<div class="section-title">Da aggiungere questo mese</div><div class="card">' +
         pending.map(function (r) {
           var cat = catByslug(r.category);
-          return '<div class="pending-item" data-id="' + r.id + '"><span class="cat-dot" style="background:var(' + cat.var + ')"></span>' +
+          return '<div class="pending-item" data-id="' + r.id + '"><span class="cat-dot" style="background:' + cat.color + '"></span>' +
             '<div class="tx-main"><div class="tx-title">' + escapeHtml(r.name) + '</div><div class="tx-sub">' + cat.name + ' · ' + formatMoney(r.amount) + '</div></div>' +
             '<button class="btn-small" data-apply="' + r.id + '">Aggiungi</button></div>';
         }).join("") +
@@ -672,14 +776,14 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
       html += '<div class="card">' + state.recurring.map(function (r) {
         var cat = catByslug(r.category);
         return '<div class="recurring-row" data-id="' + r.id + '">' +
-          '<span class="cat-dot" style="background:var(' + cat.var + ')"></span>' +
+          '<span class="cat-dot" style="background:' + cat.color + '"></span>' +
           '<div class="recurring-main"><div class="recurring-title">' + escapeHtml(r.name) + '</div>' +
-          '<div class="recurring-sub">' + formatMoney(r.amount) + ' · giorno ' + r.dayOfMonth + ' · ' + cat.name + '</div></div>' +
+          '<div class="recurring-sub">' + formatMoney(r.amount) + ' · ' + frequencyLabel(r) + ' · ' + cat.name + '</div></div>' +
           '<button class="switch' + (r.active ? " on" : "") + '" data-toggle="' + r.id + '" aria-label="Attiva o disattiva"></button>' +
           '</div>';
       }).join("") + '</div>';
     } else {
-      html += emptyStateHtml("Nessuna spesa ricorrente configurata. Aggiungi abbonamenti o bollette che si ripetono ogni mese.", "Aggiungi ricorrente", "recurringEmptyAddBtn");
+      html += emptyStateHtml("Nessuna spesa ricorrente configurata. Aggiungi abbonamenti o bollette che si ripetono nel tempo.", "Aggiungi ricorrente", "recurringEmptyAddBtn");
     }
 
     el.innerHTML = html;
@@ -713,19 +817,22 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
   function applyRecurring(id) {
     var r = state.recurring.find(function (x) { return x.id === id; });
     if (!r) return;
-    var thisMonth = monthKeyFromDate(new Date());
-    var y = parseInt(thisMonth.slice(0, 4), 10), m = parseInt(thisMonth.slice(5, 7), 10);
-    var day = Math.min(parseInt(r.dayOfMonth, 10) || 1, daysInMonth(y, m));
-    var date = thisMonth + "-" + pad2(day);
+    var dueDate = getNextDueDate(r);
+    var unit = r.frequencyUnit || "month";
+    var interval = parseInt(r.interval, 10) || 1;
     dbAddExpense({
       amount: Number(r.amount) || 0,
       category: r.category,
-      date: date,
+      date: dueDate,
       note: r.name,
       recurringId: r.id,
       createdAt: new Date().toISOString()
     });
-    dbUpdateRecurring(r.id, { lastAppliedMonth: thisMonth });
+    dbUpdateRecurring(r.id, {
+      frequencyUnit: unit,
+      interval: interval,
+      nextDueDate: advanceDate(dueDate, unit, interval)
+    });
     showToast("Aggiunta: " + r.name);
   }
 
@@ -733,20 +840,50 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     var html = '<h3>Nuova spesa ricorrente</h3>' +
       '<div class="field"><label for="recName">Nome</label><input type="text" id="recName" placeholder="Es. Abbonamento palestra" maxlength="80"></div>' +
       '<div class="field amount-field"><label for="recAmount">Importo</label><input type="number" id="recAmount" inputmode="decimal" step="0.01" min="0" placeholder="0,00"></div>' +
-      '<div class="field"><label>Categoria</label>' + categoryGridHtml(CATEGORIES[6].slug, "recCatGrid") + '</div>' +
-      '<div class="field"><label for="recDay">Giorno del mese</label><input type="number" id="recDay" min="1" max="31" value="1"></div>' +
+      '<div class="field"><label>Categoria</label>' + categoryGridHtml("abbonamenti", "recCatGrid") + '</div>' +
+      '<div class="field"><label>Frequenza</label><div class="freq-row">' +
+        '<div class="field"><input type="number" id="recInterval" min="1" max="99" value="1"></div>' +
+        '<div class="field"><select id="recUnit">' +
+          '<option value="week">Settimane</option>' +
+          '<option value="month" selected>Mesi</option>' +
+          '<option value="year">Anni</option>' +
+        '</select></div>' +
+      '</div></div>' +
+      '<div class="field"><label for="recNextDate">Prossima scadenza</label><input type="date" id="recNextDate" value="' + todayISO() + '"></div>' +
       '<button class="btn-primary" id="saveRecurringBtn">Salva</button>';
     openSheet(html);
-    var selectedCat = CATEGORIES[6].slug;
+    var selectedCat = "abbonamenti";
     wireCategoryGrid("recCatGrid", function (slug) { selectedCat = slug; });
+
+    var intervalInput = document.getElementById("recInterval");
+    var unitSelect = document.getElementById("recUnit");
+    function updateUnitLabels() {
+      var n = parseInt(intervalInput.value, 10) || 1;
+      unitSelect.options[0].textContent = n === 1 ? "Settimana" : "Settimane";
+      unitSelect.options[1].textContent = n === 1 ? "Mese" : "Mesi";
+      unitSelect.options[2].textContent = n === 1 ? "Anno" : "Anni";
+    }
+    intervalInput.addEventListener("input", updateUnitLabels);
+    updateUnitLabels();
+
     document.getElementById("saveRecurringBtn").addEventListener("click", function () {
       var name = document.getElementById("recName").value.trim();
       var amount = parseFloat(document.getElementById("recAmount").value);
-      var day = parseInt(document.getElementById("recDay").value, 10);
+      var interval = parseInt(intervalInput.value, 10);
+      var unit = unitSelect.value;
+      var nextDate = document.getElementById("recNextDate").value || todayISO();
       if (!name) { showToast("Inserisci un nome."); return; }
       if (!amount || amount <= 0) { showToast("Inserisci un importo valido."); return; }
-      if (!day || day < 1 || day > 31) day = 1;
-      dbAddRecurring({ name: name, amount: Math.round(amount * 100) / 100, category: selectedCat, dayOfMonth: day, active: true, lastAppliedMonth: null });
+      if (!interval || interval < 1) interval = 1;
+      dbAddRecurring({
+        name: name,
+        amount: Math.round(amount * 100) / 100,
+        category: selectedCat,
+        frequencyUnit: unit,
+        interval: interval,
+        nextDueDate: nextDate,
+        active: true
+      });
       closeSheet();
       showToast("Spesa ricorrente salvata");
     });
@@ -756,10 +893,10 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     var cat = catByslug(r.category);
     var html = '<h3 style="text-align:center">' + escapeHtml(r.name) + '</h3>' +
       '<div class="detail-amount">' + formatMoney(r.amount) + '</div>' +
-      '<div class="detail-cat"><span class="cat-dot" style="display:inline-block;background:var(' + cat.var + ');margin-right:6px;vertical-align:middle"></span>' + cat.name + '</div>' +
-      '<div class="detail-row"><span>Giorno del mese</span><span>' + r.dayOfMonth + '</span></div>' +
+      '<div class="detail-cat"><span class="cat-dot" style="display:inline-block;background:' + cat.color + ';margin-right:6px;vertical-align:middle"></span>' + cat.name + '</div>' +
+      '<div class="detail-row"><span>Frequenza</span><span>' + frequencyLabel(r) + '</span></div>' +
       '<div class="detail-row"><span>Stato</span><span>' + (r.active ? "Attiva" : "In pausa") + '</span></div>' +
-      '<div class="detail-row"><span>Ultimo mese applicato</span><span>' + (r.lastAppliedMonth ? formatMonthLabel(r.lastAppliedMonth) : "Mai") + '</span></div>' +
+      '<div class="detail-row"><span>Prossima scadenza</span><span>' + formatShortDate(getNextDueDate(r)) + '</span></div>' +
       '<div style="margin-top:18px; display:flex; flex-direction:column; gap:10px">' +
       '<button class="btn-danger" id="deleteRecBtn">Elimina ricorrente</button>' +
       '<button class="btn-ghost" id="closeRecDetailBtn">Chiudi</button></div>';
