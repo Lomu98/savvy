@@ -23,13 +23,11 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
   // reale via JS (fonte di verità del browser) invece di fidarsi delle
   // unità CSS, che su questo caso specifico si sono rivelate inaffidabili.
   function setAppHeight() {
-    var h = (window.visualViewport && window.visualViewport.height) || window.innerHeight;
-    document.documentElement.style.setProperty("--app-height", h + "px");
+    document.documentElement.style.setProperty("--app-height", window.innerHeight + "px");
   }
   setAppHeight();
   window.addEventListener("resize", setAppHeight);
   window.addEventListener("orientationchange", setAppHeight);
-  if (window.visualViewport) window.visualViewport.addEventListener("resize", setAppHeight);
 
   /* ============================= DATA ============================= */
   var DEFAULT_EXPENSE_CATEGORIES = [
