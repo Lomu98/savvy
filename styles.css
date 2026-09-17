@@ -462,8 +462,8 @@ nav.tabbar{
 .budget-input-wrap{ display:flex; align-items:center; gap:6px; }
 .budget-input-wrap span{ font-size:13px; color: var(--ink-muted); }
 .budget-input{
-  width: 84px; border:1px solid var(--border); background: var(--surface-raised);
-  border-radius:10px; padding:6px 9px; font-size:13.5px; color: var(--ink);
+  width: 96px; border:1px solid var(--border); background: var(--surface-raised);
+  border-radius:10px; padding:6px 9px; font-size:16px; color: var(--ink);
   font-family: var(--font-mono); text-align:right;
 }
 .budget-input:focus{ outline:2px solid var(--accent); outline-offset:1px; }
@@ -533,7 +533,7 @@ nav.tabbar{
 .field label{ display:block; font-size:12.5px; font-weight:600; color: var(--ink-secondary); margin-bottom:6px; }
 .field input, .field textarea{
   width:100%; min-width:0; border:1px solid var(--border); background: var(--page);
-  border-radius:12px; padding:12px 13px; font-size:15px; color: var(--ink);
+  border-radius:12px; padding:12px 13px; font-size:16px; color: var(--ink);
 }
 .field input:focus, .field textarea:focus{ outline:2px solid var(--accent); outline-offset:1px; }
 .field textarea{ resize:none; min-height: 60px; font-family: var(--font-body); }
@@ -558,7 +558,7 @@ nav.tabbar{
 .new-cat-form-row{ display:flex; align-items:center; gap:10px; }
 .new-cat-name{
   flex:1; border:1px solid var(--border); background: var(--surface-raised);
-  border-radius:12px; padding:11px 12px; font-size:14px; color: var(--ink);
+  border-radius:12px; padding:11px 12px; font-size:16px; color: var(--ink);
 }
 .new-cat-name:focus{ outline:2px solid var(--accent); outline-offset:1px; }
 .new-cat-color{
@@ -573,7 +573,7 @@ nav.tabbar{
 .freq-row .field{ flex:1; margin-bottom:0; }
 .freq-row select{
   width:100%; border:1px solid var(--border); background: var(--page);
-  border-radius:12px; padding:12px 13px; font-size:14px; color: var(--ink);
+  border-radius:12px; padding:12px 13px; font-size:16px; color: var(--ink);
 }
 
 .detail-amount{ font-family: var(--font-mono); font-size:30px; font-weight:600; text-align:center; margin: 4px 0 4px; }

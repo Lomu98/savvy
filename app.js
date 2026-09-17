@@ -22,12 +22,23 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
   // l'indicatore home nonostante viewport-fit=cover: si misura l'altezza
   // reale via JS (fonte di verità del browser) invece di fidarsi delle
   // unità CSS, che su questo caso specifico si sono rivelate inaffidabili.
+  // Subito dopo il cold-launch da home screen, però, window.innerHeight
+  // può restituire per un istante un valore troppo basso (WebKit non ha
+  // ancora assestato il layout fullscreen): senza un resize successivo
+  // quel valore sbagliato resta fisso per sempre, lasciando lo spazio
+  // vuoto sotto la tabbar. Si ri-misura quindi anche dopo il primo
+  // frame e ad ogni volta che l'app torna in primo piano.
   function setAppHeight() {
     document.documentElement.style.setProperty("--app-height", window.innerHeight + "px");
   }
   setAppHeight();
+  requestAnimationFrame(function () { requestAnimationFrame(setAppHeight); });
   window.addEventListener("resize", setAppHeight);
-  window.addEventListener("orientationchange", setAppHeight);
+  window.addEventListener("orientationchange", function () { setTimeout(setAppHeight, 100); });
+  window.addEventListener("pageshow", setAppHeight);
+  document.addEventListener("visibilitychange", function () {
+    if (!document.hidden) setAppHeight();
+  });
 
   /* ============================= DATA ============================= */
   var DEFAULT_EXPENSE_CATEGORIES = [
