@@ -155,10 +155,25 @@
 /* Una regola "display" di un componente vincerebbe sull'attributo hidden:
    questa lo rende sempre efficace. */
 [hidden]{ display: none !important; }
-html, body{ height: 100%; height: 100dvh; background: var(--page); }
+/* App installata su iPhone (iOS 26), barra di stato "black-translucent":
+   iOS disegna la pagina dal bordo superiore dello schermo ma la accorcia
+   dell'altezza della barra di stato (896 → 848 su un iPhone 11) e non
+   disegna nulla oltre. La striscia che resta in fondo la riempie iOS con lo
+   sfondo di html/body: gli si dà il colore della tabbar così le due si
+   fondono. Dentro la striscia c'è già l'indicatore Home, quindi il margine
+   inferiore va ridotto di quanto iOS ha tolto: --viewport-gap lo misura
+   app.js (0 quando il bug non c'è, e allora tutto resta standard). */
+:root{
+  --viewport-gap: 0px;
+  --bottom-inset: max(0px, calc(env(safe-area-inset-bottom, 0px) - var(--viewport-gap)));
+}
+html, body{ height: 100%; height: 100dvh; background: var(--surface); }
+/* Con un foglio aperto la striscia prende il colore del foglio; senza app
+   (accesso/avvio) quello della pagina. */
+html.sheet-open, html.sheet-open body{ background: var(--surface-raised); }
+html:has(#app[hidden]), html:has(#app[hidden]) body{ background: var(--page); }
 body{
   margin: 0;
-  background: var(--page);
   color: var(--ink);
   font-family: var(--font-body);
   -webkit-font-smoothing: antialiased;
@@ -215,20 +230,6 @@ p{ margin: 0; }
   display: flex;
   flex-direction: column;
   background: var(--page);
-}
-/* App installata su iPhone (iOS 26): con la barra di stato
-   "black-translucent" la pagina parte dal bordo superiore dello schermo,
-   ma iOS ne calcola l'altezza togliendo la barra di stato (896 → 848 su
-   un iPhone 11): restava una striscia di 48px sotto la tabbar. 100lvh vale
-   invece l'intero schermo. Solo in modalità app: in Safari lvh includerebbe
-   anche la zona sotto la barra degli strumenti del browser.
-   La classe .standalone la imposta app.js (navigator.standalone), nel caso
-   in cui la media query non sia riconosciuta. */
-@media (display-mode: standalone){
-  #app, .sheet-overlay, .auth-screen, .boot-screen{ bottom: auto; height: 100vh; height: 100lvh; }
-}
-.standalone #app, .standalone .sheet-overlay, .standalone .auth-screen, .standalone .boot-screen{
-  bottom: auto; height: 100vh; height: 100lvh;
 }
 
 .offline-banner{
@@ -307,7 +308,7 @@ nav.tabbar{
   display: flex;
   border-top: 1px solid var(--border);
   background: var(--surface);
-  padding: 6px 4px calc(6px + env(safe-area-inset-bottom, 0px));
+  padding: 6px 4px calc(6px + var(--bottom-inset));
   flex-shrink: 0;
 }
 .tab-btn{
@@ -333,7 +334,7 @@ nav.tabbar{
 .fab{
   position: absolute;
   right: 16px;
-  bottom: calc(76px + env(safe-area-inset-bottom, 0px));
+  bottom: calc(76px + var(--bottom-inset));
   width: 56px; height: 56px;
   border-radius: var(--radius-pill);
   border: none;
@@ -568,7 +569,7 @@ nav.tabbar{
 .sheet{
   width:100%; max-width:560px; max-height: 88vh; max-height: 88dvh; overflow-y:auto; overflow-x:hidden;
   background: var(--surface-raised); border-radius: 22px 22px 0 0;
-  padding: 0 20px calc(22px + env(safe-area-inset-bottom, 0px));
+  padding: 0 20px calc(22px + var(--bottom-inset));
   box-shadow: var(--shadow-sheet);
   animation: sheetup 0.2s ease;
   transition: transform 0.18s ease;
@@ -645,10 +646,10 @@ html.debug-layers nav.tabbar{ background: #00c853 !important; }
   *, *::before, *::after{ animation: none !important; transition: none !important; }
 }
 
-/* absolute rispetto a #app (che è fixed), così segue la sua altezza reale
-   anche nel caso iOS descritto sopra, invece del viewport accorciato. */
+/* absolute rispetto a #app (che è fixed): resta centrato sulla colonna
+   dell'app anche su schermi larghi. */
 .toast{
-  position: absolute; left:50%; bottom: calc(96px + env(safe-area-inset-bottom, 0px));
+  position: absolute; left:50%; bottom: calc(96px + var(--bottom-inset));
   transform: translateX(-50%);
   background: var(--ink); color: var(--page); font-size:13px; font-weight:600;
   padding:10px 18px; border-radius: var(--radius-pill); z-index: 30;

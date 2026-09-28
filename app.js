@@ -17,11 +17,24 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
 (function () {
   "use strict";
 
-  /* ============================= MODALITÀ APP (standalone) ============================= */
-  // L'altezza dell'app in modalità installata è gestita in CSS (vedi
-  // "App installata su iPhone" in styles.css). Questa classe è la rete di
-  // sicurezza nel caso la media query display-mode non venga riconosciuta.
-  if (navigator.standalone) document.documentElement.classList.add("standalone");
+  /* ============================= VIEWPORT ACCORCIATO (iOS 26, app installata) ============================= */
+  // Nell'app installata iOS 26 accorcia il viewport dell'altezza della barra
+  // di stato senza spostarlo: resta una striscia in fondo che iOS non fa
+  // disegnare alla pagina (vedi styles.css, --viewport-gap). Lo scarto si
+  // misura solo in verticale (screen è sempre riferito al portrait su iOS)
+  // e solo a tastiera chiusa, cioè quando il viewport non è più basso dello
+  // schermo meno la barra di stato più alta possibile (~60px).
+  var isStandalone = !!navigator.standalone || matchMedia("(display-mode: standalone)").matches;
+  function updateViewportGap() {
+    var gap = 0;
+    var portrait = Math.abs(window.innerWidth - screen.width) < 2;
+    var missing = screen.height - window.innerHeight;
+    if (isStandalone && portrait && missing > 0 && missing <= 64) gap = missing;
+    document.documentElement.style.setProperty("--viewport-gap", gap + "px");
+  }
+  updateViewportGap();
+  window.addEventListener("resize", updateViewportGap);
+  window.addEventListener("pageshow", updateViewportGap);
 
   /* ============================= DATA ============================= */
   var DEFAULT_EXPENSE_CATEGORIES = [
@@ -312,6 +325,8 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
       ["visualViewport", vv ? Math.round(vv.height) + " (offsetTop " + Math.round(vv.offsetTop) + ", scale " + vv.scale + ")" : "n/d"],
       ["100vh / dvh / svh / lvh", [height("vh"), height("dvh"), height("svh"), height("lvh")].join(" / ")],
       ["safe-area top / bottom", inset("top") + " / " + inset("bottom")],
+      ["--viewport-gap / --bottom-inset", getComputedStyle(document.documentElement).getPropertyValue("--viewport-gap").trim() + " / " +
+        measureProbe("padding-top:var(--bottom-inset)", function (p) { return parseFloat(getComputedStyle(p).paddingTop) || 0; })],
       ["html", rectOf("html")],
       ["body", rectOf("body")],
       ["#app", rectOf("#app")],
@@ -513,10 +528,12 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     }
     sheetEl.style.transform = "";
     sheetOverlay.hidden = false;
+    document.documentElement.classList.add("sheet-open");
     sheetEl.focus({ preventScroll: true });
   }
   function closeSheet() {
     sheetOverlay.hidden = true;
+    document.documentElement.classList.remove("sheet-open");
     sheetContent.innerHTML = "";
     if (sheetReturnFocus && document.body.contains(sheetReturnFocus)) sheetReturnFocus.focus({ preventScroll: true });
     sheetReturnFocus = null;
