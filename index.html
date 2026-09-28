@@ -22,7 +22,13 @@
 </head>
 <body>
 
-  <div class="auth-screen" id="authScreen">
+  <!-- Visibile finché Firebase non ha stabilito se l'utente è loggato:
+       evita il lampo della schermata di accesso a ogni avvio. -->
+  <div class="boot-screen" id="bootScreen">
+    <img class="auth-logo" src="icon-192.png" alt="Savvy">
+  </div>
+
+  <div class="auth-screen" id="authScreen" hidden>
     <img class="auth-logo" src="icon-192.png" alt="">
     <h1>Savvy</h1>
     <p>Traccia entrate e spese, imposta budget mensili e gestisci i movimenti ricorrenti. Accedi per sincronizzare i dati su tutti i tuoi dispositivi.</p>

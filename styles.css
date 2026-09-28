@@ -134,6 +134,9 @@
 
 /* ============================= RESET / BASE ============================= */
 *, *::before, *::after{ box-sizing: border-box; }
+/* Una regola "display" di un componente vincerebbe sull'attributo hidden:
+   questa lo rende sempre efficace. */
+[hidden]{ display: none !important; }
 html, body{ height: 100%; height: 100dvh; background: var(--page); }
 body{
   margin: 0;
@@ -155,7 +158,11 @@ p{ margin: 0; }
   display: flex; flex-direction: column; align-items: center; justify-content: center;
   gap: 18px; padding: 32px; text-align: center; background: var(--page);
 }
-.auth-screen[hidden]{ display: none; }
+.boot-screen{
+  position: fixed; inset: 0; z-index: 60;
+  display: flex; align-items: center; justify-content: center;
+  background: var(--page);
+}
 .auth-logo{ width: 72px; height: 72px; border-radius: 22px; box-shadow: var(--shadow-raised); }
 .auth-screen h1{ font-size: 22px; }
 .auth-screen p{ font-size: 13.5px; color: var(--ink-secondary); max-width: 280px; line-height: 1.5; }
@@ -184,7 +191,6 @@ p{ margin: 0; }
   flex-direction: column;
   background: var(--page);
 }
-#app[hidden]{ display: none; }
 
 .offline-banner{
   background: var(--warning);
@@ -194,7 +200,6 @@ p{ margin: 0; }
   text-align: center;
   padding: 7px 16px;
 }
-.offline-banner[hidden]{ display: none; }
 
 .topbar{
   flex-shrink: 0;
@@ -249,7 +254,8 @@ main#views{
   overflow-y: auto;
   overflow-x: hidden;
   -webkit-overflow-scrolling: touch;
-  padding: 14px 16px calc(24px + env(safe-area-inset-bottom, 0px));
+  /* Spazio sotto l'ultima riga per non finire coperta dal FAB (56px + margini). */
+  padding: 14px 16px 92px;
 }
 .view{ display: none; }
 .view.active{ display: block; animation: fadein 0.18s ease; }
@@ -518,7 +524,6 @@ nav.tabbar{
   position: fixed; inset: 0; background: rgba(11,11,11,0.45);
   display:flex; align-items:flex-end; justify-content:center; z-index: 20;
 }
-.sheet-overlay[hidden]{ display:none; }
 .sheet{
   width:100%; max-width:560px; max-height: 88vh; overflow-y:auto; overflow-x:hidden;
   background: var(--surface-raised); border-radius: 22px 22px 0 0;
@@ -554,7 +559,6 @@ nav.tabbar{
   font-size:12px; font-weight:700; line-height:1;
 }
 .new-cat-form{ margin-top:10px; padding:12px; border:1px solid var(--border); border-radius:13px; background: var(--page); }
-.new-cat-form[hidden]{ display:none; }
 .new-cat-form-row{ display:flex; align-items:center; gap:10px; }
 .new-cat-name{
   flex:1; border:1px solid var(--border); background: var(--surface-raised);
@@ -591,4 +595,3 @@ nav.tabbar{
   padding:10px 18px; border-radius: var(--radius-pill); z-index: 30;
   box-shadow: var(--shadow-raised);
 }
-.toast[hidden]{ display:none; }

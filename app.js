@@ -9,8 +9,8 @@ import {
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 import {
   initializeFirestore, persistentLocalCache,
-  collection, doc, addDoc, setDoc, updateDoc, deleteDoc,
-  onSnapshot, query, orderBy, limit
+  collection, doc, addDoc, setDoc, updateDoc, deleteDoc, writeBatch,
+  onSnapshot, query, where, orderBy
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
 import { FIREBASE_CONFIG } from "./firebase-config.js";
 
@@ -93,8 +93,11 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
   };
   var toastTimer = null;
 
-  function todayISO(){ return new Date().toISOString().slice(0,10); }
-  function monthKeyFromDate(d){ return d.toISOString().slice(0,7); }
+  // Date sempre nel fuso locale: toISOString() restituirebbe la data UTC,
+  // che in Italia tra mezzanotte e l'1/2 di notte è ancora "ieri".
+  function isoFromDate(d){ return d.getFullYear() + "-" + pad2(d.getMonth()+1) + "-" + pad2(d.getDate()); }
+  function todayISO(){ return isoFromDate(new Date()); }
+  function monthKeyFromDate(d){ return isoFromDate(d).slice(0,7); }
   function pad2(n){ return String(n).padStart(2,"0"); }
   function daysInMonth(year, month){ return new Date(year, month, 0).getDate(); } // month: 1-12
   function addMonths(ym, delta){
@@ -148,8 +151,21 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     if (status === "warning") return "Vicino al limite";
     return "Sotto controllo";
   }
+  // Sicuro sia nel testo sia dentro attributi tra virgolette.
+  var HTML_ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
   function escapeHtml(s){
-    var d = document.createElement("div"); d.textContent = s; return d.innerHTML;
+    return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return HTML_ESCAPES[c]; });
+  }
+  // I colori finiscono dentro style="…": si accettano solo hex o var(--token).
+  function safeColor(c){
+    return /^#[0-9a-f]{3,8}$/i.test(c) || /^var\(--[a-z0-9-]+\)$/.test(c) ? c : "var(--cat-altro)";
+  }
+  // Accetta sia "12,50" sia "12.50" (e "1.234,50"); NaN se non è un numero.
+  function parseAmount(str){
+    var s = String(str || "").replace(/[\s€]/g, "");
+    if (s.indexOf(",") !== -1) s = s.replace(/\./g, "").replace(",", ".");
+    if (!/^\d*\.?\d*$/.test(s) || s === "" || s === ".") return NaN;
+    return Number(s);
   }
 
   /* ============================= FIREBASE ============================= */
@@ -165,12 +181,15 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
   }
 
   var currentUser = null;
-  var unsubExpenses = null, unsubIncomes = null, unsubBudgets = null, unsubRecurring = null, unsubCategories = null;
+  var unsubTransactions = [], unsubOthers = [];
+  var loadedFromMonth = null;
+  var syncError = "";
 
   function userCollection(name){ return collection(dbFs, "users", currentUser.uid, name); }
   function userDoc(name, id){ return doc(dbFs, "users", currentUser.uid, name, id); }
 
   onAuthStateChanged(auth, function (user) {
+    document.getElementById("bootScreen").hidden = true;
     if (user) {
       currentUser = user;
       showApp(user);
@@ -216,8 +235,13 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     document.getElementById("authScreen").hidden = true;
     document.getElementById("app").hidden = false;
     var btn = document.getElementById("accountBtn");
+    btn.textContent = "";
     if (user.photoURL) {
-      btn.innerHTML = '<img src="' + googleCropUrl(user.photoURL, 96) + '" alt="">';
+      var img = document.createElement("img");
+      img.src = googleCropUrl(user.photoURL, 96);
+      img.alt = "";
+      img.referrerPolicy = "no-referrer";
+      btn.appendChild(img);
     } else {
       btn.textContent = (user.displayName || user.email || "?").charAt(0).toUpperCase();
     }
@@ -238,49 +262,72 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
   }
 
   /* ============================= DB LAYER (Firestore) ============================= */
+  // Gli errori dei listener (es. permission-denied se le regole non sono
+  // pubblicate) finiscono nel banner di stato invece di essere ignorati.
+  function onSyncError(err) {
+    syncError = err && err.code === "permission-denied"
+      ? "Accesso ai dati negato: verifica di aver pubblicato le regole Firestore."
+      : "Sincronizzazione non riuscita. I dati mostrati potrebbero non essere aggiornati.";
+    updateStatusBanner();
+  }
+  function clearSyncError() {
+    if (!syncError) return;
+    syncError = "";
+    updateStatusBanner();
+  }
+
+  // Si scaricano i movimenti da `loadedFromMonth` in poi (futuri inclusi).
+  // Se si naviga più indietro, la finestra si allarga: niente tetto fisso
+  // che faccia sparire in silenzio i mesi più vecchi.
+  function subscribeTransactions(fromMonth) {
+    unsubTransactions.forEach(function (u) { u(); });
+    loadedFromMonth = fromMonth;
+    unsubTransactions = ["expenses", "incomes"].map(function (name) {
+      var q = query(userCollection(name), where("date", ">=", fromMonth + "-01"), orderBy("date", "desc"));
+      return onSnapshot(q, function (snap) {
+        state[name] = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
+        clearSyncError();
+        renderCurrentView();
+      }, onSyncError);
+    });
+  }
+  // Il grafico dell'andamento mostra i 6 mesi fino a quello visualizzato.
+  function ensureLoadedFrom(month) {
+    var needed = addMonths(month, -5);
+    if (currentUser && loadedFromMonth && needed < loadedFromMonth) subscribeTransactions(needed);
+  }
+
   function subscribeAll() {
     unsubscribeAll();
-    try {
-      var expensesQuery = query(userCollection("expenses"), orderBy("date", "desc"), limit(1000));
-      unsubExpenses = onSnapshot(expensesQuery, function (snap) {
-        state.expenses = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
-        renderCurrentView();
-      }, function () { /* connectivity banner covers persistent failures */ });
+    subscribeTransactions(addMonths(state.currentMonth, -11));
 
-      var incomesQuery = query(userCollection("incomes"), orderBy("date", "desc"), limit(1000));
-      unsubIncomes = onSnapshot(incomesQuery, function (snap) {
-        state.incomes = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
-        renderCurrentView();
-      }, function () { /* connectivity banner covers persistent failures */ });
+    unsubOthers.push(onSnapshot(userCollection("budgets"), function (snap) {
+      var map = {};
+      snap.docs.forEach(function (d) { var data = d.data(); map[d.id] = Number(data.limit) || 0; });
+      state.budgets = map;
+      renderCurrentView();
+    }, onSyncError));
 
-      unsubBudgets = onSnapshot(userCollection("budgets"), function (snap) {
-        var map = {};
-        snap.docs.forEach(function (d) { var data = d.data(); map[d.id] = Number(data.limit) || 0; });
-        state.budgets = map;
-        renderCurrentView();
-      }, function () {});
+    unsubOthers.push(onSnapshot(userCollection("recurring"), function (snap) {
+      state.recurring = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
+      renderCurrentView();
+    }, onSyncError));
 
-      unsubRecurring = onSnapshot(userCollection("recurring"), function (snap) {
-        state.recurring = snap.docs.map(function (d) { return Object.assign({ id: d.id }, d.data()); });
-        renderCurrentView();
-      }, function () {});
-
-      unsubCategories = onSnapshot(userCollection("categories"), function (snap) {
-        state.customCategories = snap.docs.map(function (d) {
-          var data = d.data();
-          return { slug: d.id, name: data.name, color: data.color, kind: data.kind || "expense", custom: true };
-        });
-        renderCurrentView();
-      }, function () {});
-    } catch (e) { /* connectivity banner covers this */ }
+    unsubOthers.push(onSnapshot(userCollection("categories"), function (snap) {
+      state.customCategories = snap.docs.map(function (d) {
+        var data = d.data();
+        return { slug: d.id, name: String(data.name || "Categoria"), color: safeColor(data.color), kind: data.kind || "expense", custom: true };
+      });
+      renderCurrentView();
+    }, onSyncError));
   }
   function unsubscribeAll() {
-    if (unsubExpenses) unsubExpenses();
-    if (unsubIncomes) unsubIncomes();
-    if (unsubBudgets) unsubBudgets();
-    if (unsubRecurring) unsubRecurring();
-    if (unsubCategories) unsubCategories();
-    unsubExpenses = unsubIncomes = unsubBudgets = unsubRecurring = unsubCategories = null;
+    unsubTransactions.concat(unsubOthers).forEach(function (u) { u(); });
+    unsubTransactions = [];
+    unsubOthers = [];
+    loadedFromMonth = null;
+    syncError = "";
+    updateStatusBanner();
     state.expenses = []; state.incomes = []; state.budgets = {}; state.recurring = []; state.customCategories = [];
   }
 
@@ -308,22 +355,32 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
   function dbDeleteRecurring(id) {
     return deleteDoc(userDoc("recurring", id)).catch(function () { showToast("Eliminazione non riuscita."); });
   }
+  // Registra il movimento e fa avanzare la scadenza in un'unica scrittura
+  // atomica: se una delle due fallisse, la ricorrente verrebbe riproposta.
+  function dbApplyRecurring(kind, txData, recurringId, recurringUpdate) {
+    var batch = writeBatch(dbFs);
+    batch.set(doc(userCollection(kind === "income" ? "incomes" : "expenses")), txData);
+    batch.update(userDoc("recurring", recurringId), recurringUpdate);
+    return batch.commit().then(function () { return true; }, function () {
+      showToast("Non salvato: controlla la connessione.");
+      return false;
+    });
+  }
   function dbAddCategory(slug, name, color, kind) {
     return setDoc(userDoc("categories", slug), { name: name, color: color, kind: kind || "expense" }).catch(function () { showToast("Categoria non salvata."); });
   }
 
-  /* ============================= CONNECTIVITY BANNER ============================= */
-  function updateConnectivityBanner() {
+  /* ============================= STATUS BANNER ============================= */
+  function updateStatusBanner() {
     var banner = document.getElementById("offlineBanner");
-    if (navigator.onLine) {
-      banner.hidden = true;
-    } else {
-      banner.hidden = false;
-      banner.textContent = "Sei offline: le modifiche verranno sincronizzate automaticamente quando torni online.";
-    }
+    var msg = !navigator.onLine
+      ? "Sei offline: le modifiche verranno sincronizzate automaticamente quando torni online."
+      : syncError;
+    banner.hidden = !msg;
+    banner.textContent = msg;
   }
-  window.addEventListener("online", updateConnectivityBanner);
-  window.addEventListener("offline", updateConnectivityBanner);
+  window.addEventListener("online", updateStatusBanner);
+  window.addEventListener("offline", updateStatusBanner);
 
   /* ============================= TOAST / SHEET ============================= */
   function showToast(msg) {
@@ -361,18 +418,14 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     openAddTransactionSheet(kind);
   });
 
-  document.getElementById("prevMonthBtn").addEventListener("click", function () {
-    state.currentMonth = addMonths(state.currentMonth, -1);
+  function goToMonth(ym) {
+    state.currentMonth = ym;
+    ensureLoadedFrom(ym);
     updateMonthLabel(); renderCurrentView();
-  });
-  document.getElementById("nextMonthBtn").addEventListener("click", function () {
-    state.currentMonth = addMonths(state.currentMonth, 1);
-    updateMonthLabel(); renderCurrentView();
-  });
-  document.getElementById("goToTodayBtn").addEventListener("click", function () {
-    state.currentMonth = monthKeyFromDate(new Date());
-    updateMonthLabel(); renderCurrentView();
-  });
+  }
+  document.getElementById("prevMonthBtn").addEventListener("click", function () { goToMonth(addMonths(state.currentMonth, -1)); });
+  document.getElementById("nextMonthBtn").addEventListener("click", function () { goToMonth(addMonths(state.currentMonth, 1)); });
+  document.getElementById("goToTodayBtn").addEventListener("click", function () { goToMonth(monthKeyFromDate(new Date())); });
   function updateMonthLabel() {
     document.getElementById("monthLabel").textContent = formatMonthLabel(state.currentMonth);
     document.getElementById("goToTodayBtn").hidden = (state.currentMonth === monthKeyFromDate(new Date()));
@@ -392,8 +445,8 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
 
   function categoryGridHtml(selectedSlug, name, kind) {
     var grid = '<div class="cat-grid" id="' + name + '">' + getCategories(kind).map(function (c) {
-      return '<div class="cat-opt' + (c.slug === selectedSlug ? " selected" : "") + '" data-slug="' + c.slug + '">' +
-        '<span class="cat-dot" style="background:' + c.color + '"></span><span>' + escapeHtml(c.name) + '</span></div>';
+      return '<div class="cat-opt' + (c.slug === selectedSlug ? " selected" : "") + '" data-slug="' + escapeHtml(c.slug) + '">' +
+        '<span class="cat-dot" style="background:' + safeColor(c.color) + '"></span><span>' + escapeHtml(c.name) + '</span></div>';
     }).join("") +
       '<div class="cat-opt cat-opt-add" data-slug="__add__"><span class="cat-dot-add">+</span><span>Nuova</span></div>' +
       '</div>';
@@ -441,7 +494,7 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
       var tile = document.createElement("div");
       tile.className = "cat-opt";
       tile.dataset.slug = slug;
-      tile.innerHTML = '<span class="cat-dot" style="background:' + color + '"></span><span>' + escapeHtml(name) + '</span>';
+      tile.innerHTML = '<span class="cat-dot" style="background:' + safeColor(color) + '"></span><span>' + escapeHtml(name) + '</span>';
       grid.insertBefore(tile, addOpt);
       wireOpt(tile);
       selectOpt(tile);
@@ -467,7 +520,7 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
         '<button type="button" class="type-toggle-btn' + (isIncome ? " active" : "") + '" data-kind="income">Entrata</button>' +
       '</div>' +
       '<div class="field amount-field"><label for="txAmount">Importo</label>' +
-        '<input type="number" id="txAmount" inputmode="decimal" step="0.01" min="0" placeholder="0,00" autofocus></div>' +
+        '<input type="text" id="txAmount" inputmode="decimal" autocomplete="off" placeholder="0,00" autofocus></div>' +
       '<div class="field"><label>Categoria</label>' + categoryGridHtml(lastUsed, "addCatGrid", kind) + '</div>' +
       '<div class="field"><label for="txDate">Data</label><input type="date" id="txDate" value="' + todayISO() + '"></div>' +
       '<div class="field"><label for="txNote">Nota (opzionale)</label><input type="text" id="txNote" placeholder="' + (isIncome ? "Es. Bonifico stipendio" : "Es. Spesa al supermercato") + '" maxlength="120"></div>' +
@@ -491,7 +544,7 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     var selectedCat = lastUsed;
     wireCategoryGrid("addCatGrid", function (slug) { selectedCat = slug; }, kind);
     document.getElementById("saveTxBtn").addEventListener("click", function () {
-      var amountVal = parseFloat(document.getElementById("txAmount").value);
+      var amountVal = parseAmount(document.getElementById("txAmount").value);
       var dateVal = document.getElementById("txDate").value || todayISO();
       var noteVal = document.getElementById("txNote").value.trim();
       if (!amountVal || amountVal <= 0) { showToast("Inserisci un importo valido."); return; }
@@ -518,7 +571,7 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     var html =
       '<h3 style="text-align:center">Dettaglio ' + (isIncome ? "entrata" : "spesa") + '</h3>' +
       '<div class="detail-amount' + (isIncome ? " income" : "") + '">' + (isIncome ? "+" : "") + formatMoney(tx.amount) + '</div>' +
-      '<div class="detail-cat"><span class="cat-dot" style="display:inline-block;background:' + cat.color + ';margin-right:6px;vertical-align:middle"></span>' + cat.name + '</div>' +
+      '<div class="detail-cat"><span class="cat-dot" style="display:inline-block;background:' + safeColor(cat.color) + ';margin-right:6px;vertical-align:middle"></span>' + escapeHtml(cat.name) + '</div>' +
       '<div class="detail-row"><span>Data</span><span>' + formatDayHeading(tx.date) + '</span></div>' +
       (tx.note ? '<div class="detail-row"><span>Nota</span><span>' + escapeHtml(tx.note) + '</span></div>' : '') +
       (tx.recurringId ? '<div class="detail-row"><span>Origine</span><span>' + (isIncome ? "Entrata ricorrente" : "Spesa ricorrente") + '</span></div>' : '') +
@@ -558,10 +611,17 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     var expenseTotal = totalOf(monthExpenses);
     var incomeTotal = totalOf(monthIncomes);
     var net = incomeTotal - expenseTotal;
-    var totalBudget = Object.keys(state.budgets).reduce(function (s, k) { return s + (Number(state.budgets[k]) || 0); }, 0);
-    var hasBudget = totalBudget > 0;
-    var pct = hasBudget ? expenseTotal / totalBudget : 0;
+    var bySlug = sumByCategory(monthExpenses);
+    // Il confronto col budget considera solo le categorie che ne hanno uno:
+    // sommare anche le spese delle categorie senza limite falserebbe l'esito.
+    var expenseCats = getCategories("expense");
+    var budgeted = expenseCats.filter(function (c) { return (state.budgets[c.slug] || 0) > 0; });
+    var totalBudget = budgeted.reduce(function (s, c) { return s + state.budgets[c.slug]; }, 0);
+    var budgetedSpent = budgeted.reduce(function (s, c) { return s + (bySlug[c.slug] || 0); }, 0);
+    var hasBudget = budgeted.length > 0;
+    var pct = hasBudget ? budgetedSpent / totalBudget : 0;
     var status = statusForPct(pct);
+    var remaining = totalBudget - budgetedSpent;
 
     var pendingRecurring = getPendingRecurring();
 
@@ -574,9 +634,16 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
       '</div>';
     if (hasBudget) {
       html += '<div class="meter-track"><div class="meter-fill ' + status + '" style="width:' + Math.min(100, pct * 100) + '%"></div></div>' +
-        '<div class="status-row ' + status + '">' + statusIcon(status) + '<span>' + statusLabel(status) + ' — ' + formatMoney(totalBudget - expenseTotal >= 0 ? totalBudget - expenseTotal : expenseTotal - totalBudget) + (totalBudget - expenseTotal >= 0 ? ' rimanenti' : ' oltre il budget di ' + formatMoney(totalBudget)) + '</span></div>';
+        '<div class="status-row ' + status + '">' + statusIcon(status) + '<span>' + statusLabel(status) + ' — ' +
+          (remaining >= 0
+            ? formatMoney(remaining) + ' rimanenti su ' + formatMoney(totalBudget)
+            : formatMoney(-remaining) + ' oltre il budget di ' + formatMoney(totalBudget)) +
+        '</span></div>';
+      if (budgeted.length < expenseCats.length) {
+        html += '<div class="hero-sub">Calcolato ' + (budgeted.length === 1 ? "sull'unica categoria" : "sulle " + budgeted.length + " categorie") + ' con un budget.</div>';
+      }
     } else {
-      html += '<div class="hero-sub">Nessun budget impostato per questo mese.</div>' +
+      html += '<div class="hero-sub">Nessun budget impostato.</div>' +
         '<button class="link-btn" id="goSetBudget" style="margin-top:6px">Imposta un budget →</button>';
     }
     html += '</div>';
@@ -586,16 +653,15 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
         '<button id="goRecurringBanner">Gestisci</button></div>';
     }
 
-    var bySlug = sumByCategory(monthExpenses);
-    var topCats = getCategories("expense").map(function (c) { return { cat: c, amount: bySlug[c.slug] || 0 }; })
+    var topCats = expenseCats.map(function (c) { return { cat: c, amount: bySlug[c.slug] || 0 }; })
       .filter(function (x) { return x.amount > 0; })
       .sort(function (a, b) { return b.amount - a.amount; })
       .slice(0, 3);
     if (topCats.length) {
       html += '<div class="section-title">Categorie principali</div><div class="card">' +
         topCats.map(function (x) {
-          return '<div class="mini-cat-row"><span class="cat-dot" style="background:' + x.cat.color + '"></span>' +
-            '<span class="mini-cat-name">' + x.cat.name + '</span><span class="mini-cat-amount num">' + formatMoney(x.amount) + '</span></div>';
+          return '<div class="mini-cat-row"><span class="cat-dot" style="background:' + safeColor(x.cat.color) + '"></span>' +
+            '<span class="mini-cat-name">' + escapeHtml(x.cat.name) + '</span><span class="mini-cat-amount num">' + formatMoney(x.amount) + '</span></div>';
         }).join("") + '</div>';
     }
 
@@ -626,10 +692,10 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     kind = e._kind || kind || "expense";
     var isIncome = kind === "income";
     var cat = catByslug(e.category);
-    return '<div class="tx-row" data-id="' + e.id + '" data-kind="' + kind + '">' +
-      '<div class="tx-icon" style="background:' + cat.color + '">' + catInitial(e.category) + '</div>' +
-      '<div class="tx-main"><div class="tx-title">' + (e.note ? escapeHtml(e.note) : cat.name) + '</div>' +
-      '<div class="tx-sub">' + cat.name + ' · ' + formatShortDate(e.date) + '</div></div>' +
+    return '<div class="tx-row" data-id="' + escapeHtml(e.id) + '" data-kind="' + kind + '">' +
+      '<div class="tx-icon" style="background:' + safeColor(cat.color) + '">' + escapeHtml(catInitial(e.category)) + '</div>' +
+      '<div class="tx-main"><div class="tx-title">' + escapeHtml(e.note || cat.name) + '</div>' +
+      '<div class="tx-sub">' + escapeHtml(cat.name) + ' · ' + formatShortDate(e.date) + '</div></div>' +
       '<div class="tx-amount num' + (isIncome ? " income" : "") + '">' + (isIncome ? "+" : "") + formatMoney(e.amount) + '</div></div>';
   }
   function wireTxRows(container) {
@@ -666,8 +732,8 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     var chips = '<div class="chip-row" id="listChips">' +
       '<div class="chip' + (state.listFilter === "all" ? " active" : "") + '" data-slug="all">Tutte</div>' +
       getCategories(kind).map(function (c) {
-        return '<div class="chip' + (state.listFilter === c.slug ? " active" : "") + '" data-slug="' + c.slug + '">' +
-          '<span class="cat-dot" style="background:' + c.color + '"></span>' + escapeHtml(c.name) + '</div>';
+        return '<div class="chip' + (state.listFilter === c.slug ? " active" : "") + '" data-slug="' + escapeHtml(c.slug) + '">' +
+          '<span class="cat-dot" style="background:' + safeColor(c.color) + '"></span>' + escapeHtml(c.name) + '</div>';
       }).join("") + '</div>';
 
     var body;
@@ -711,8 +777,8 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
       var pct = max ? (x.amount / max * 100) : 0;
       var share = total ? (x.amount / total * 100) : 0;
       return '<div class="bar-chart-row">' +
-        '<div class="bar-chart-head"><span>' + x.cat.name + '</span><span class="num">' + formatMoney(x.amount) + '<span class="pct">' + share.toFixed(0) + '%</span></span></div>' +
-        '<div class="bar-track"><div class="bar-fill" style="width:' + pct + '%;background:' + x.cat.color + '"></div></div>' +
+        '<div class="bar-chart-head"><span>' + escapeHtml(x.cat.name) + '</span><span class="num">' + formatMoney(x.amount) + '<span class="pct">' + share.toFixed(0) + '%</span></span></div>' +
+        '<div class="bar-track"><div class="bar-fill" style="width:' + pct + '%;background:' + safeColor(x.cat.color) + '"></div></div>' +
         '</div>';
     }).join("") + '</div>';
   }
@@ -731,13 +797,19 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     var incomeRows = getCategories("income").map(function (c) { return { cat: c, amount: bySlugIncome[c.slug] || 0 }; })
       .filter(function (x) { return x.amount > 0; }).sort(function (a, b) { return b.amount - a.amount; });
 
-    var avgPerDay = expenseTotal / daysInMonth(parseInt(state.currentMonth.slice(0, 4), 10), parseInt(state.currentMonth.slice(5, 7), 10));
+    // Nel mese in corso si divide per i giorni trascorsi, non per quelli
+    // totali; per i mesi futuri la media non ha senso.
+    var thisMonth = monthKeyFromDate(new Date());
+    var daysElapsed = state.currentMonth < thisMonth
+      ? daysInMonth(parseInt(state.currentMonth.slice(0, 4), 10), parseInt(state.currentMonth.slice(5, 7), 10))
+      : state.currentMonth === thisMonth ? new Date().getDate() : 0;
+    var avgPerDayLabel = daysElapsed ? formatMoney(expenseTotal / daysElapsed) : "—";
 
     var html = '<div class="stat-tiles">' +
       '<div class="stat-tile"><div class="stat-tile-label">Entrate mese</div><div class="stat-tile-value num">' + formatMoney(incomeTotal) + '</div></div>' +
       '<div class="stat-tile"><div class="stat-tile-label">Uscite mese</div><div class="stat-tile-value num">' + formatMoney(expenseTotal) + '</div></div>' +
       '<div class="stat-tile"><div class="stat-tile-label">Saldo mese</div><div class="stat-tile-value num" style="color:' + (net < 0 ? "var(--critical)" : "var(--good)") + '">' + (net < 0 ? "−" : "") + formatMoney(Math.abs(net)) + '</div></div>' +
-      '<div class="stat-tile"><div class="stat-tile-label">Media/giorno (uscite)</div><div class="stat-tile-value num">' + formatMoney(avgPerDay) + '</div></div>' +
+      '<div class="stat-tile"><div class="stat-tile-label">Media/giorno (uscite)</div><div class="stat-tile-value num">' + avgPerDayLabel + '</div></div>' +
       '</div>';
 
     html += '<div class="section-title">Uscite per categoria</div>';
@@ -802,10 +874,11 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
       '<div class="trend-legend"><span class="trend-legend-item"><span class="dot expense"></span>Uscite</span>' +
       '<span class="trend-legend-item"><span class="dot income"></span>Entrate</span></div>' + svg;
 
-    var tooltip = null;
+    var tooltip = null, tooltipTimer = null;
     container.querySelectorAll(".trend-pt").forEach(function (pt) {
       pt.addEventListener("click", function () {
         if (tooltip) tooltip.remove();
+        clearTimeout(tooltipTimer);
         var i = parseInt(pt.dataset.i, 10);
         var seriesKey = pt.dataset.series;
         var value = seriesKey === "income" ? incomeTotals[i] : expenseTotals[i];
@@ -820,39 +893,61 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
         tooltip.style.top = cy + "px";
         tooltip.textContent = (seriesKey === "income" ? "Entrate " : "Uscite ") + formatMonthLabel(months[i]).split(" ")[0].replace(/^\w/, function (c) { return c.toUpperCase(); }) + " · " + formatMoney(value);
         container.appendChild(tooltip);
-        setTimeout(function () { if (tooltip) { tooltip.remove(); tooltip = null; } }, 2200);
+        tooltipTimer = setTimeout(function () { if (tooltip) { tooltip.remove(); tooltip = null; } }, 2200);
       });
     });
   }
 
   /* ============================= BUDGET VIEW ============================= */
+  function budgetMeterHtml(limitVal, spent) {
+    if (!(limitVal > 0)) return '<div class="budget-meter-line">Speso finora: ' + formatMoney(spent) + ' — nessun limite impostato</div>';
+    var pct = spent / limitVal;
+    return '<div class="meter-track"><div class="meter-fill ' + statusForPct(pct) + '" style="width:' + Math.min(100, pct * 100) + '%"></div></div>' +
+      '<div class="budget-meter-line">' + formatMoney(spent) + ' di ' + formatMoney(limitVal) + ' (' + (pct * 100).toFixed(0) + '%)</div>';
+  }
+  function formatBudgetInput(limitVal) {
+    return limitVal ? String(limitVal).replace(".", ",") : "";
+  }
   function renderBudget() {
     var el = document.getElementById("view-budget");
-    var monthExpenses = expensesForMonth(state.currentMonth);
-    var bySlug = sumByCategory(monthExpenses);
+    var bySlug = sumByCategory(expensesForMonth(state.currentMonth));
+    var cats = getCategories("expense");
 
-    var html = '<p style="font-size:13px;color:var(--ink-secondary);margin-bottom:14px">Imposta un tetto di spesa mensile per categoria. Le modifiche si applicano da ' + formatMonthLabel(state.currentMonth) + ' in poi.</p>';
-    html += '<div class="card">' + getCategories("expense").map(function (c) {
+    // Se l'utente sta scrivendo in un campo, un re-render completo gli
+    // toglierebbe focus e tastiera (succede a ogni salvataggio o sync):
+    // finché le categorie sono le stesse si aggiornano solo le barre.
+    var rows = el.querySelectorAll(".budget-row");
+    var active = document.activeElement;
+    var editing = active && active.classList.contains("budget-input") && el.contains(active);
+    var sameRows = rows.length === cats.length && cats.every(function (c, i) { return rows[i].dataset.slug === c.slug; });
+    if (editing && sameRows) {
+      cats.forEach(function (c, i) {
+        var limitVal = state.budgets[c.slug] || 0;
+        rows[i].querySelector(".budget-meter").innerHTML = budgetMeterHtml(limitVal, bySlug[c.slug] || 0);
+        var input = rows[i].querySelector(".budget-input");
+        if (input !== active) input.value = formatBudgetInput(limitVal);
+      });
+      return;
+    }
+
+    var html = '<p style="font-size:13px;color:var(--ink-secondary);margin-bottom:14px">Imposta un tetto di spesa mensile per categoria. Il limite vale per tutti i mesi.</p>';
+    html += '<div class="card">' + cats.map(function (c) {
       var limitVal = state.budgets[c.slug] || 0;
-      var spent = bySlug[c.slug] || 0;
-      var pct = limitVal > 0 ? spent / limitVal : 0;
-      var status = limitVal > 0 ? statusForPct(pct) : null;
-      return '<div class="budget-row" data-slug="' + c.slug + '">' +
-        '<div class="budget-row-head"><span class="cat-dot" style="background:' + c.color + '"></span>' +
+      return '<div class="budget-row" data-slug="' + escapeHtml(c.slug) + '">' +
+        '<div class="budget-row-head"><span class="cat-dot" style="background:' + safeColor(c.color) + '"></span>' +
         '<span class="mini-cat-name">' + escapeHtml(c.name) + '</span></div>' +
-        '<div class="budget-input-wrap"><span>€</span><input type="number" class="budget-input" min="0" step="1" value="' + (limitVal || "") + '" placeholder="0" data-slug="' + c.slug + '"></div>' +
-        (limitVal > 0 ?
-          ('<div class="meter-track"><div class="meter-fill ' + status + '" style="width:' + Math.min(100, pct * 100) + '%"></div></div>' +
-           '<div class="budget-meter-line">' + formatMoney(spent) + ' di ' + formatMoney(limitVal) + ' (' + (pct * 100).toFixed(0) + '%)</div>')
-          : '<div class="budget-meter-line">Speso finora: ' + formatMoney(spent) + ' — nessun limite impostato</div>') +
+        '<div class="budget-input-wrap"><span>€</span><input type="text" inputmode="decimal" autocomplete="off" class="budget-input" value="' + formatBudgetInput(limitVal) + '" placeholder="0" data-slug="' + escapeHtml(c.slug) + '" aria-label="Budget ' + escapeHtml(c.name) + '"></div>' +
+        '<div class="budget-meter">' + budgetMeterHtml(limitVal, bySlug[c.slug] || 0) + '</div>' +
         '</div>';
     }).join("") + '</div>';
 
     el.innerHTML = html;
     el.querySelectorAll(".budget-input").forEach(function (input) {
       input.addEventListener("change", function () {
-        var val = parseFloat(input.value);
-        if (isNaN(val) || val < 0) val = 0;
+        var val = input.value.trim() === "" ? 0 : parseAmount(input.value);
+        if (isNaN(val)) { showToast("Inserisci un importo valido."); input.value = formatBudgetInput(state.budgets[input.dataset.slug] || 0); return; }
+        val = Math.round(val * 100) / 100;
+        if (val === (state.budgets[input.dataset.slug] || 0)) return;
         dbSetBudget(input.dataset.slug, val);
         showToast("Budget aggiornato");
       });
@@ -866,23 +961,28 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     var words = FREQ_UNIT_LABELS[r.frequencyUnit] || FREQ_UNIT_LABELS.month;
     return n === 1 ? "ogni " + words[0] : "ogni " + n + " " + words[1];
   }
-  // Sposta una data ISO avanti di `interval` unità (settimana/mese/anno),
-  // mantenendo il giorno del mese quando possibile (es. 31 gen + 1 mese -> 28/29 feb).
-  function advanceDate(iso, unit, interval) {
+  // Sposta una data ISO avanti di `interval` unità (settimana/mese/anno).
+  // Per mesi e anni si parte da `anchorDay`, il giorno originale della
+  // ricorrenza, e lo si accorcia solo se il mese è più corto: così
+  // 31 gen → 28 feb → 31 mar, invece di restare bloccati al 28.
+  function advanceDate(iso, unit, interval, anchorDay) {
     var parts = iso.split("-").map(function (n) { return parseInt(n, 10); });
     var y = parts[0], m = parts[1], d = parts[2];
-    if (unit === "week") {
-      var dt = new Date(y, m - 1, d + 7 * interval);
-      return dt.getFullYear() + "-" + pad2(dt.getMonth() + 1) + "-" + pad2(dt.getDate());
-    }
+    if (unit === "week") return isoFromDate(new Date(y, m - 1, d + 7 * interval));
+    var day = anchorDay || d;
     if (unit === "year") {
       var ny = y + interval;
-      return ny + "-" + pad2(m) + "-" + pad2(Math.min(d, daysInMonth(ny, m)));
+      return ny + "-" + pad2(m) + "-" + pad2(Math.min(day, daysInMonth(ny, m)));
     }
     var totalMonths = (m - 1) + interval;
     var newY = y + Math.floor(totalMonths / 12);
     var newM = (totalMonths % 12) + 1;
-    return newY + "-" + pad2(newM) + "-" + pad2(Math.min(d, daysInMonth(newY, newM)));
+    return newY + "-" + pad2(newM) + "-" + pad2(Math.min(day, daysInMonth(newY, newM)));
+  }
+  // I documenti precedenti ad `anchorDay` usano `dayOfMonth` (formato
+  // legacy) o, in mancanza, il giorno della prossima scadenza.
+  function recurringAnchorDay(r) {
+    return parseInt(r.anchorDay, 10) || parseInt(r.dayOfMonth, 10) || parseInt(getNextDueDate(r).slice(8, 10), 10);
   }
   // Ricorrenti create prima dell'introduzione delle frequenze flessibili
   // avevano solo `dayOfMonth` + `lastAppliedMonth`: qui si deriva la prossima
@@ -907,11 +1007,11 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
       html += '<div class="card">' + list.map(function (r) {
         var cat = catByslug(r.category);
         var isIncome = kind === "income";
-        return '<div class="recurring-row" data-id="' + r.id + '">' +
-          '<span class="cat-dot" style="background:' + cat.color + '"></span>' +
+        return '<div class="recurring-row" data-id="' + escapeHtml(r.id) + '">' +
+          '<span class="cat-dot" style="background:' + safeColor(cat.color) + '"></span>' +
           '<div class="recurring-main"><div class="recurring-title">' + escapeHtml(r.name) + '</div>' +
-          '<div class="recurring-sub">' + (isIncome ? "+" : "") + formatMoney(r.amount) + ' · ' + frequencyLabel(r) + ' · ' + cat.name + '</div></div>' +
-          '<button class="switch' + (r.active ? " on" : "") + '" data-toggle="' + r.id + '" aria-label="Attiva o disattiva"></button>' +
+          '<div class="recurring-sub">' + (isIncome ? "+" : "") + formatMoney(r.amount) + ' · ' + frequencyLabel(r) + ' · ' + escapeHtml(cat.name) + '</div></div>' +
+          '<button class="switch' + (r.active ? " on" : "") + '" data-toggle="' + escapeHtml(r.id) + '" aria-label="Attiva o disattiva"></button>' +
           '</div>';
       }).join("") + '</div>';
     } else {
@@ -935,9 +1035,9 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
         pending.map(function (r) {
           var cat = catByslug(r.category);
           var isIncome = recurringKind(r) === "income";
-          return '<div class="pending-item" data-id="' + r.id + '"><span class="cat-dot" style="background:' + cat.color + '"></span>' +
-            '<div class="tx-main"><div class="tx-title">' + escapeHtml(r.name) + '</div><div class="tx-sub">' + cat.name + ' · ' + (isIncome ? "+" : "") + formatMoney(r.amount) + '</div></div>' +
-            '<button class="btn-small" data-apply="' + r.id + '">Aggiungi</button></div>';
+          return '<div class="pending-item" data-id="' + escapeHtml(r.id) + '"><span class="cat-dot" style="background:' + safeColor(cat.color) + '"></span>' +
+            '<div class="tx-main"><div class="tx-title">' + escapeHtml(r.name) + '</div><div class="tx-sub">' + escapeHtml(cat.name) + ' · ' + formatShortDate(getNextDueDate(r)) + ' · ' + (isIncome ? "+" : "") + formatMoney(r.amount) + '</div></div>' +
+            '<button class="btn-small" data-apply="' + escapeHtml(r.id) + '">Aggiungi</button></div>';
         }).join("") +
         (pending.length > 1 ? '<button class="btn-ghost" id="applyAllBtn" style="margin-top:12px">Aggiungi tutte (' + pending.length + ')</button>' : "") +
         '</div>';
@@ -949,7 +1049,7 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     el.innerHTML = html;
 
     el.querySelectorAll("[data-apply]").forEach(function (btn) {
-      btn.addEventListener("click", function () { applyRecurring(btn.dataset.apply); });
+      btn.addEventListener("click", function () { btn.disabled = true; applyRecurring(btn.dataset.apply); });
     });
     var applyAllBtn = document.getElementById("applyAllBtn");
     if (applyAllBtn) applyAllBtn.addEventListener("click", function () {
@@ -978,12 +1078,18 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     if (recurringEmptyAddBtnIncome) recurringEmptyAddBtnIncome.addEventListener("click", function () { openAddRecurringSheet("income"); });
   }
 
+  // id ricorrente → scadenza già registrata. Evita il doppio inserimento se
+  // si tocca due volte (o "Aggiungi tutte") prima che lo stato si aggiorni.
+  var appliedRecurring = {};
   function applyRecurring(id) {
     var r = state.recurring.find(function (x) { return x.id === id; });
     if (!r) return;
     var dueDate = getNextDueDate(r);
+    if (appliedRecurring[r.id] === dueDate) return;
+    appliedRecurring[r.id] = dueDate;
     var unit = r.frequencyUnit || "month";
     var interval = parseInt(r.interval, 10) || 1;
+    var anchorDay = recurringAnchorDay(r);
     var kind = recurringKind(r);
     var data = {
       amount: Number(r.amount) || 0,
@@ -993,13 +1099,13 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
       recurringId: r.id,
       createdAt: new Date().toISOString()
     };
-    if (kind === "income") dbAddIncome(data); else dbAddExpense(data);
-    dbUpdateRecurring(r.id, {
+    dbApplyRecurring(kind, data, r.id, {
       kind: kind,
       frequencyUnit: unit,
       interval: interval,
-      nextDueDate: advanceDate(dueDate, unit, interval)
-    });
+      anchorDay: anchorDay,
+      nextDueDate: advanceDate(dueDate, unit, interval, anchorDay)
+    }).then(function (ok) { if (!ok) delete appliedRecurring[r.id]; });
     showToast("Aggiunta: " + r.name);
   }
 
@@ -1009,7 +1115,7 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     var defaultCat = isIncome ? "stipendio" : "abbonamenti";
     var html = '<h3>' + (isIncome ? "Nuova entrata ricorrente" : "Nuova spesa ricorrente") + '</h3>' +
       '<div class="field"><label for="recName">Nome</label><input type="text" id="recName" placeholder="' + (isIncome ? "Es. Stipendio" : "Es. Abbonamento palestra") + '" maxlength="80"></div>' +
-      '<div class="field amount-field"><label for="recAmount">Importo</label><input type="number" id="recAmount" inputmode="decimal" step="0.01" min="0" placeholder="0,00"></div>' +
+      '<div class="field amount-field"><label for="recAmount">Importo</label><input type="text" id="recAmount" inputmode="decimal" autocomplete="off" placeholder="0,00"></div>' +
       '<div class="field"><label>Categoria</label>' + categoryGridHtml(defaultCat, "recCatGrid", kind) + '</div>' +
       '<div class="field"><label>Frequenza</label><div class="freq-row">' +
         '<div class="field"><input type="number" id="recInterval" min="1" max="99" value="1"></div>' +
@@ -1038,7 +1144,7 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
 
     document.getElementById("saveRecurringBtn").addEventListener("click", function () {
       var name = document.getElementById("recName").value.trim();
-      var amount = parseFloat(document.getElementById("recAmount").value);
+      var amount = parseAmount(document.getElementById("recAmount").value);
       var interval = parseInt(intervalInput.value, 10);
       var unit = unitSelect.value;
       var nextDate = document.getElementById("recNextDate").value || todayISO();
@@ -1051,6 +1157,7 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
         category: selectedCat,
         frequencyUnit: unit,
         interval: interval,
+        anchorDay: parseInt(nextDate.slice(8, 10), 10),
         nextDueDate: nextDate,
         active: true,
         kind: kind
@@ -1066,7 +1173,7 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     var cat = catByslug(r.category);
     var html = '<h3 style="text-align:center">' + escapeHtml(r.name) + '</h3>' +
       '<div class="detail-amount' + (isIncome ? " income" : "") + '">' + (isIncome ? "+" : "") + formatMoney(r.amount) + '</div>' +
-      '<div class="detail-cat"><span class="cat-dot" style="display:inline-block;background:' + cat.color + ';margin-right:6px;vertical-align:middle"></span>' + cat.name + '</div>' +
+      '<div class="detail-cat"><span class="cat-dot" style="display:inline-block;background:' + safeColor(cat.color) + ';margin-right:6px;vertical-align:middle"></span>' + escapeHtml(cat.name) + '</div>' +
       '<div class="detail-row"><span>Tipo</span><span>' + (isIncome ? "Entrata" : "Spesa") + '</span></div>' +
       '<div class="detail-row"><span>Frequenza</span><span>' + frequencyLabel(r) + '</span></div>' +
       '<div class="detail-row"><span>Stato</span><span>' + (r.active ? "Attiva" : "In pausa") + '</span></div>' +
@@ -1096,5 +1203,5 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
   /* ============================= INIT ============================= */
   updateMonthLabel();
   setView("home");
-  updateConnectivityBanner();
+  updateStatusBanner();
 })();
