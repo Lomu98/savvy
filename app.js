@@ -28,16 +28,21 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
   // quel valore sbagliato resta fisso per sempre, lasciando lo spazio
   // vuoto sotto la tabbar. Si ri-misura quindi anche dopo il primo
   // frame e ad ogni volta che l'app torna in primo piano.
-  function setAppHeight() {
+  // Storico delle misure (per la diagnostica temporanea della barra in basso).
+  var appHeightLog = [];
+  var bootTime = Date.now();
+  function setAppHeight(reason) {
     document.documentElement.style.setProperty("--app-height", window.innerHeight + "px");
+    appHeightLog.push((Date.now() - bootTime) + "ms " + (typeof reason === "string" ? reason : (reason && reason.type) || "?") + ": " + window.innerHeight);
+    if (appHeightLog.length > 15) appHeightLog.shift();
   }
-  setAppHeight();
-  requestAnimationFrame(function () { requestAnimationFrame(setAppHeight); });
+  setAppHeight("avvio");
+  requestAnimationFrame(function () { requestAnimationFrame(function () { setAppHeight("secondo frame"); }); });
   window.addEventListener("resize", setAppHeight);
-  window.addEventListener("orientationchange", function () { setTimeout(setAppHeight, 100); });
+  window.addEventListener("orientationchange", function () { setTimeout(function () { setAppHeight("orientationchange"); }, 100); });
   window.addEventListener("pageshow", setAppHeight);
   document.addEventListener("visibilitychange", function () {
-    if (!document.hidden) setAppHeight();
+    if (!document.hidden) setAppHeight("visibilitychange");
   });
 
   /* ============================= DATA ============================= */
@@ -185,6 +190,10 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     var vsWhite = 1.05 / (L + 0.05), vsDark = (L + 0.05) / 0.0556;
     return vsWhite >= vsDark ? "#fff" : "#111";
   }
+  // Importo → testo per un campo di input, con la virgola decimale ("" se 0).
+  function formatAmountInput(n){
+    return n ? String(n).replace(".", ",") : "";
+  }
   // Accetta sia "12,50" sia "12.50" (e "1.234,50"); NaN se non è un numero.
   function parseAmount(str){
     var s = String(str || "").replace(/[\s€]/g, "");
@@ -281,11 +290,86 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     if (!user) return;
     var html = '<h3 style="text-align:center">Account</h3>' +
       '<p style="text-align:center;font-size:13.5px;color:var(--ink-secondary);margin-bottom:20px">' + escapeHtml(user.email || "") + '</p>' +
-      '<button class="btn-danger" id="signOutBtn">Esci</button>';
+      '<div style="display:flex;flex-direction:column;gap:10px">' +
+      '<button type="button" class="btn-ghost" id="layoutDiagBtn">Diagnostica schermo</button>' +
+      '<button type="button" class="btn-danger" id="signOutBtn">Esci</button>' +
+      '</div>';
     openSheet(html);
+    document.getElementById("layoutDiagBtn").addEventListener("click", openLayoutDiagnostics);
     document.getElementById("signOutBtn").addEventListener("click", function () {
       closeSheet();
       signOut(auth);
+    });
+  }
+
+  /* ============================= DIAGNOSTICA LAYOUT (temporanea) ============================= */
+  // Serve a capire, sul telefono vero, da dove viene la striscia sotto la
+  // tabbar su iPhone: raccoglie le misure del viewport e permette di colorare
+  // i livelli della pagina. Da rimuovere una volta risolto il problema.
+  function measureProbe(css, read) {
+    var p = document.createElement("div");
+    p.style.cssText = "position:fixed;top:0;left:0;width:1px;visibility:hidden;pointer-events:none;" + css;
+    document.body.appendChild(p);
+    var v = read(p);
+    p.remove();
+    return Math.round(v * 10) / 10;
+  }
+  function rectOf(sel) {
+    var el = document.querySelector(sel);
+    if (!el) return "—";
+    var r = el.getBoundingClientRect();
+    return "top " + Math.round(r.top) + " · bottom " + Math.round(r.bottom) + " · h " + Math.round(r.height);
+  }
+  function collectLayoutInfo() {
+    var vv = window.visualViewport;
+    var height = function (unit) { return measureProbe("height:100" + unit, function (p) { return p.getBoundingClientRect().height; }); };
+    var inset = function (side) { return measureProbe("padding-top:env(safe-area-inset-" + side + ")", function (p) { return parseFloat(getComputedStyle(p).paddingTop) || 0; }); };
+    return [
+      ["Standalone", String(!!navigator.standalone || matchMedia("(display-mode: standalone)").matches)],
+      ["Tema scuro", String(matchMedia("(prefers-color-scheme: dark)").matches)],
+      ["screen", screen.width + " × " + screen.height],
+      ["inner", window.innerWidth + " × " + window.innerHeight],
+      ["outerHeight", String(window.outerHeight)],
+      ["clientHeight (html)", String(document.documentElement.clientHeight)],
+      ["visualViewport", vv ? Math.round(vv.height) + " (offsetTop " + Math.round(vv.offsetTop) + ", scale " + vv.scale + ")" : "n/d"],
+      ["100vh / dvh / svh / lvh", [height("vh"), height("dvh"), height("svh"), height("lvh")].join(" / ")],
+      ["safe-area top / bottom", inset("top") + " / " + inset("bottom")],
+      ["--app-height", getComputedStyle(document.documentElement).getPropertyValue("--app-height").trim()],
+      ["html", rectOf("html")],
+      ["body", rectOf("body")],
+      ["#app", rectOf("#app")],
+      ["tabbar", rectOf("nav.tabbar")],
+      ["Storico altezze", appHeightLog.join(" | ")],
+      ["User agent", navigator.userAgent]
+    ];
+  }
+  function openLayoutDiagnostics() {
+    var rows = collectLayoutInfo();
+    var colored = document.documentElement.classList.contains("debug-layers");
+    var html = '<h3>Diagnostica schermo</h3>' +
+      '<p style="font-size:13px;color:var(--ink-secondary);line-height:1.5;margin-bottom:12px">' +
+        'Attiva "Colora i livelli", chiudi questo pannello e guarda di che colore è la striscia sotto la barra: ' +
+        '<b style="color:#ff00ff">magenta</b> = sfondo della pagina (html), <b style="color:#00b8d4">azzurro</b> = body, ' +
+        '<b style="color:#e6b800">giallo</b> = contenitore dell\'app, <b style="color:#00c853">verde</b> = la barra stessa. ' +
+        'Se resta <b>nera</b>, la striscia è fuori dalla pagina (la disegna iOS).</p>' +
+      '<div class="card" style="padding:12px 14px;margin-bottom:12px">' + rows.map(function (r) {
+        return '<div class="detail-row" style="gap:12px"><span>' + escapeHtml(r[0]) + '</span><span class="num" style="font-size:12px;word-break:break-word">' + escapeHtml(r[1]) + '</span></div>';
+      }).join("") + '</div>' +
+      '<div style="display:flex;flex-direction:column;gap:10px">' +
+      '<button type="button" class="btn-primary" id="diagColorBtn" style="margin-top:0">' + (colored ? "Togli i colori" : "Colora i livelli") + '</button>' +
+      '<button type="button" class="btn-ghost" id="diagCopyBtn">Copia i dati</button>' +
+      '</div>';
+    openSheet(html);
+    document.getElementById("diagColorBtn").addEventListener("click", function () {
+      document.documentElement.classList.toggle("debug-layers");
+      closeSheet();
+    });
+    document.getElementById("diagCopyBtn").addEventListener("click", function () {
+      var text = rows.map(function (r) { return r[0] + ": " + r[1]; }).join("\n");
+      navigator.clipboard.writeText(text).then(
+        function () { showToast("Dati copiati"); },
+        function () { showToast("Copia non riuscita: fai uno screenshot."); }
+      );
     });
   }
 
@@ -382,6 +466,22 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
   }
   function dbDeleteRecurring(id) {
     return deleteDoc(userDoc("recurring", id)).catch(function () { showToast("Eliminazione non riuscita."); });
+  }
+  function txCollectionName(kind) { return kind === "income" ? "incomes" : "expenses"; }
+  // Aggiorna un movimento esistente. Se ne cambia il tipo (spesa ↔ entrata)
+  // il documento va spostato nell'altra collezione: creazione della copia e
+  // cancellazione dell'originale in un'unica scrittura atomica.
+  function dbUpdateTransaction(tx, newKind, changes) {
+    var write;
+    if (tx.kind === newKind) {
+      write = updateDoc(userDoc(txCollectionName(newKind), tx.id), changes);
+    } else {
+      var batch = writeBatch(dbFs);
+      batch.set(doc(userCollection(txCollectionName(newKind))), Object.assign({}, tx.data, changes));
+      batch.delete(userDoc(txCollectionName(tx.kind), tx.id));
+      write = batch.commit();
+    }
+    return write.catch(function () { showToast("Modifica non salvata: controlla la connessione."); });
   }
   // Registra il movimento e fa avanzare la scadenza in un'unica scrittura
   // atomica: se una delle due fallisse, la ricorrente verrebbe riproposta.
@@ -639,42 +739,50 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     var saved = readLastCategory(kind);
     return cats.some(function (c) { return c.slug === saved; }) ? saved : cats[0].slug;
   }
-  function openAddTransactionSheet(kind, prefill) {
+  // Lo stesso modulo serve per inserire e per modificare: `editing` è il
+  // movimento esistente ({ id, kind, data }) oppure assente per uno nuovo.
+  function openAddTransactionSheet(kind, prefill, editing) {
     kind = kind || "expense";
     var isIncome = kind === "income";
-    var lastUsed = lastUsedCategory(kind);
     prefill = prefill || {};
+    // La categoria precompilata vale solo se esiste per il tipo scelto
+    // (cambiando Spesa ↔ Entrata le categorie sono diverse).
+    var initialCat = prefill.category && getCategories(kind).some(function (c) { return c.slug === prefill.category; })
+      ? prefill.category
+      : lastUsedCategory(kind);
+    var submitLabel = editing ? "Salva modifiche" : (isIncome ? "Aggiungi entrata" : "Aggiungi spesa");
     var html =
       '<form id="txForm" novalidate>' +
-      '<h3>Nuovo movimento</h3>' +
+      '<h3>' + (editing ? "Modifica movimento" : "Nuovo movimento") + '</h3>' +
       '<div class="type-toggle" id="txTypeToggle">' +
         '<button type="button" class="type-toggle-btn' + (!isIncome ? " active" : "") + '" aria-pressed="' + !isIncome + '" data-kind="expense">Spesa</button>' +
         '<button type="button" class="type-toggle-btn' + (isIncome ? " active" : "") + '" aria-pressed="' + isIncome + '" data-kind="income">Entrata</button>' +
       '</div>' +
       '<div class="field amount-field"><label for="txAmount">Importo</label>' +
         '<input type="text" id="txAmount" inputmode="decimal" autocomplete="off" placeholder="0,00"></div>' +
-      '<div class="field"><span class="field-label">Categoria</span>' + categoryGridHtml(lastUsed, "addCatGrid", kind) + '</div>' +
+      '<div class="field"><span class="field-label">Categoria</span>' + categoryGridHtml(initialCat, "addCatGrid", kind) + '</div>' +
       '<div class="field"><label for="txDate">Data</label><input type="date" id="txDate" value="' + todayISO() + '"></div>' +
       '<div class="field"><label for="txNote">Nota (opzionale)</label><input type="text" id="txNote" placeholder="' + (isIncome ? "Es. Bonifico stipendio" : "Es. Spesa al supermercato") + '" maxlength="120" enterkeyhint="done"></div>' +
-      '<button type="submit" class="btn-primary">' + (isIncome ? "Aggiungi entrata" : "Aggiungi spesa") + '</button>' +
+      '<button type="submit" class="btn-primary">' + submitLabel + '</button>' +
       '</form>';
     openSheet(html);
     if (prefill.amount) document.getElementById("txAmount").value = prefill.amount;
     if (prefill.date) document.getElementById("txDate").value = prefill.date;
     if (prefill.note) document.getElementById("txNote").value = prefill.note;
 
+    var selectedCat = initialCat;
     document.querySelectorAll("#txTypeToggle .type-toggle-btn").forEach(function (btn) {
       btn.addEventListener("click", function () {
         if (btn.dataset.kind === kind) return;
         openAddTransactionSheet(btn.dataset.kind, {
           amount: document.getElementById("txAmount").value,
           date: document.getElementById("txDate").value,
-          note: document.getElementById("txNote").value
-        });
+          note: document.getElementById("txNote").value,
+          category: selectedCat
+        }, editing);
       });
     });
 
-    var selectedCat = lastUsed;
     wireCategoryGrid("addCatGrid", function (slug) { selectedCat = slug; }, kind);
     document.getElementById("txForm").addEventListener("submit", function (e) {
       e.preventDefault();
@@ -682,6 +790,18 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
       var dateVal = document.getElementById("txDate").value || todayISO();
       var noteVal = document.getElementById("txNote").value.trim();
       if (!amountVal || amountVal <= 0) { showToast("Inserisci un importo valido."); return; }
+      if (editing) {
+        dbUpdateTransaction(editing, kind, {
+          amount: Math.round(amountVal * 100) / 100,
+          category: selectedCat,
+          date: dateVal,
+          note: noteVal,
+          updatedAt: new Date().toISOString()
+        });
+        closeSheet();
+        showToast("Movimento aggiornato");
+        return;
+      }
       saveLastCategory(kind, selectedCat);
       var data = {
         amount: Math.round(amountVal * 100) / 100,
@@ -710,11 +830,23 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
       (tx.note ? '<div class="detail-row"><span>Nota</span><span>' + escapeHtml(tx.note) + '</span></div>' : '') +
       (tx.recurringId ? '<div class="detail-row"><span>Origine</span><span>' + (isIncome ? "Entrata ricorrente" : "Spesa ricorrente") + '</span></div>' : '') +
       '<div style="margin-top:18px; display:flex; flex-direction:column; gap:10px">' +
-      '<button class="btn-danger" id="deleteTxBtn">Elimina ' + (isIncome ? "entrata" : "spesa") + '</button>' +
-      '<button class="btn-ghost" id="cancelDetailBtn">Chiudi</button>' +
+      '<button type="button" class="btn-primary" id="editTxBtn" style="margin-top:0">Modifica</button>' +
+      '<button type="button" class="btn-danger" id="deleteTxBtn">Elimina ' + (isIncome ? "entrata" : "spesa") + '</button>' +
+      '<button type="button" class="btn-ghost" id="cancelDetailBtn">Chiudi</button>' +
       '</div>';
     openSheet(html);
     document.getElementById("cancelDetailBtn").addEventListener("click", closeSheet);
+    document.getElementById("editTxBtn").addEventListener("click", function () {
+      // Dati salvati del movimento, senza i campi aggiunti lato client.
+      var data = Object.assign({}, tx);
+      delete data.id; delete data._kind;
+      openAddTransactionSheet(kind, {
+        amount: formatAmountInput(tx.amount),
+        date: tx.date,
+        note: tx.note || "",
+        category: tx.category
+      }, { id: tx.id, kind: kind, data: data });
+    });
     wireConfirmButton(document.getElementById("deleteTxBtn"), function () {
       if (isIncome) dbDeleteIncome(tx.id); else dbDeleteExpense(tx.id);
       closeSheet();
@@ -1072,9 +1204,6 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     return '<div class="meter-track"><div class="meter-fill ' + statusForPct(pct) + '" style="width:' + Math.min(100, pct * 100) + '%"></div></div>' +
       '<div class="budget-meter-line">' + formatMoney(spent) + ' di ' + formatMoney(limitVal) + ' (' + (pct * 100).toFixed(0) + '%)</div>';
   }
-  function formatBudgetInput(limitVal) {
-    return limitVal ? String(limitVal).replace(".", ",") : "";
-  }
   function renderBudget() {
     var el = document.getElementById("view-budget");
     var bySlug = sumByCategory(expensesForMonth(state.currentMonth));
@@ -1092,7 +1221,7 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
         var limitVal = state.budgets[c.slug] || 0;
         rows[i].querySelector(".budget-meter").innerHTML = budgetMeterHtml(limitVal, bySlug[c.slug] || 0);
         var input = rows[i].querySelector(".budget-input");
-        if (input !== active) input.value = formatBudgetInput(limitVal);
+        if (input !== active) input.value = formatAmountInput(limitVal);
       });
       return;
     }
@@ -1103,7 +1232,7 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
       return '<div class="budget-row" data-slug="' + escapeHtml(c.slug) + '">' +
         '<div class="budget-row-head"><span class="cat-dot" style="background:' + safeColor(c.color) + '"></span>' +
         '<span class="mini-cat-name">' + escapeHtml(c.name) + '</span></div>' +
-        '<div class="budget-input-wrap"><span>€</span><input type="text" inputmode="decimal" autocomplete="off" class="budget-input" value="' + formatBudgetInput(limitVal) + '" placeholder="0" data-slug="' + escapeHtml(c.slug) + '" aria-label="Budget ' + escapeHtml(c.name) + '"></div>' +
+        '<div class="budget-input-wrap"><span>€</span><input type="text" inputmode="decimal" autocomplete="off" class="budget-input" value="' + formatAmountInput(limitVal) + '" placeholder="0" data-slug="' + escapeHtml(c.slug) + '" aria-label="Budget ' + escapeHtml(c.name) + '"></div>' +
         '<div class="budget-meter">' + budgetMeterHtml(limitVal, bySlug[c.slug] || 0) + '</div>' +
         '</div>';
     }).join("") + '</div>';
@@ -1112,7 +1241,7 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     el.querySelectorAll(".budget-input").forEach(function (input) {
       input.addEventListener("change", function () {
         var val = input.value.trim() === "" ? 0 : parseAmount(input.value);
-        if (isNaN(val)) { showToast("Inserisci un importo valido."); input.value = formatBudgetInput(state.budgets[input.dataset.slug] || 0); return; }
+        if (isNaN(val)) { showToast("Inserisci un importo valido."); input.value = formatAmountInput(state.budgets[input.dataset.slug] || 0); return; }
         val = Math.round(val * 100) / 100;
         if (val === (state.budgets[input.dataset.slug] || 0)) return;
         dbSetBudget(input.dataset.slug, val);

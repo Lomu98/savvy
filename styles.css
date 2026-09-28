@@ -621,6 +621,13 @@ nav.tabbar{
 .detail-row span:first-child{ color: var(--ink-muted); }
 .detail-row span:last-child{ font-weight:600; text-align:right; max-width: 60%; }
 
+/* Diagnostica temporanea della striscia sotto la tabbar su iPhone:
+   ogni livello ha un colore diverso per capire quale resta scoperto. */
+html.debug-layers{ background: #ff00ff !important; }
+html.debug-layers body{ background: #00e5ff !important; }
+html.debug-layers #app{ background: #ffd400 !important; }
+html.debug-layers nav.tabbar{ background: #00c853 !important; }
+
 @media (prefers-reduced-motion: reduce){
   *, *::before, *::after{ animation: none !important; transition: none !important; }
 }
