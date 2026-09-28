@@ -18,18 +18,28 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
   "use strict";
 
   /* ============================= VIEWPORT ACCORCIATO (iOS 26, app installata) ============================= */
-  // Nell'app installata iOS 26 accorcia il viewport dell'altezza della barra
-  // di stato senza spostarlo: resta una striscia in fondo che iOS non fa
-  // disegnare alla pagina (vedi styles.css, --viewport-gap). Lo scarto si
-  // misura solo in verticale (screen è sempre riferito al portrait su iOS)
-  // e solo a tastiera chiusa, cioè quando il viewport non è più basso dello
-  // schermo meno la barra di stato più alta possibile (~60px).
+  // Con la barra di stato "black-translucent" (icone installate prima del
+  // passaggio a "default"), iOS 26 accorcia il viewport dell'altezza della
+  // barra di stato senza spostarlo: resta una striscia in fondo che la
+  // pagina non può disegnare (vedi styles.css, --viewport-gap).
+  // Il bug c'è solo se la pagina sta anche sotto la barra di stato (safe
+  // area superiore > 0): con "default" la barra è fuori dalla pagina e i
+  // 48px in meno sono corretti. Si misura solo in verticale (screen è
+  // sempre riferito al portrait su iOS) e a tastiera chiusa (scarto ≤ 64px).
   var isStandalone = !!navigator.standalone || matchMedia("(display-mode: standalone)").matches;
+  function safeAreaTop() {
+    var p = document.createElement("div");
+    p.style.cssText = "position:fixed;visibility:hidden;padding-top:env(safe-area-inset-top)";
+    document.body.appendChild(p);
+    var v = parseFloat(getComputedStyle(p).paddingTop) || 0;
+    p.remove();
+    return v;
+  }
   function updateViewportGap() {
     var gap = 0;
     var portrait = Math.abs(window.innerWidth - screen.width) < 2;
     var missing = screen.height - window.innerHeight;
-    if (isStandalone && portrait && missing > 0 && missing <= 64) gap = missing;
+    if (isStandalone && portrait && missing > 0 && missing <= 64 && safeAreaTop() > 0) gap = missing;
     document.documentElement.style.setProperty("--viewport-gap", gap + "px");
   }
   updateViewportGap();

@@ -12,7 +12,11 @@
   <meta name="theme-color" content="#f9f9f7" media="(prefers-color-scheme: light)">
   <meta name="theme-color" content="#0d0d0d" media="(prefers-color-scheme: dark)">
   <meta name="apple-mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <!-- "default" e non "black-translucent": con la barra trasparente iOS 26
+       disegna la pagina da sotto la barra di stato ma la accorcia di quanto
+       è alta, lasciando una striscia in fondo. iOS legge questo valore
+       all'installazione: dopo averlo cambiato va reinstallata l'icona. -->
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="Savvy">
   <meta name="mobile-web-app-capable" content="yes">
 
