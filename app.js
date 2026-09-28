@@ -291,86 +291,11 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     if (!user) return;
     var html = '<h3 style="text-align:center">Account</h3>' +
       '<p style="text-align:center;font-size:13.5px;color:var(--ink-secondary);margin-bottom:20px">' + escapeHtml(user.email || "") + '</p>' +
-      '<div style="display:flex;flex-direction:column;gap:10px">' +
-      '<button type="button" class="btn-ghost" id="layoutDiagBtn">Diagnostica schermo</button>' +
-      '<button type="button" class="btn-danger" id="signOutBtn">Esci</button>' +
-      '</div>';
+      '<button type="button" class="btn-danger" id="signOutBtn">Esci</button>';
     openSheet(html);
-    document.getElementById("layoutDiagBtn").addEventListener("click", openLayoutDiagnostics);
     document.getElementById("signOutBtn").addEventListener("click", function () {
       closeSheet();
       signOut(auth);
-    });
-  }
-
-  /* ============================= DIAGNOSTICA LAYOUT (temporanea) ============================= */
-  // Serve a capire, sul telefono vero, da dove viene la striscia sotto la
-  // tabbar su iPhone: raccoglie le misure del viewport e permette di colorare
-  // i livelli della pagina. Da rimuovere una volta risolto il problema.
-  function measureProbe(css, read) {
-    var p = document.createElement("div");
-    p.style.cssText = "position:fixed;top:0;left:0;width:1px;visibility:hidden;pointer-events:none;" + css;
-    document.body.appendChild(p);
-    var v = read(p);
-    p.remove();
-    return Math.round(v * 10) / 10;
-  }
-  function rectOf(sel) {
-    var el = document.querySelector(sel);
-    if (!el) return "—";
-    var r = el.getBoundingClientRect();
-    return "top " + Math.round(r.top) + " · bottom " + Math.round(r.bottom) + " · h " + Math.round(r.height);
-  }
-  function collectLayoutInfo() {
-    var vv = window.visualViewport;
-    var height = function (unit) { return measureProbe("height:100" + unit, function (p) { return p.getBoundingClientRect().height; }); };
-    var inset = function (side) { return measureProbe("padding-top:env(safe-area-inset-" + side + ")", function (p) { return parseFloat(getComputedStyle(p).paddingTop) || 0; }); };
-    return [
-      ["Standalone (navigator / display-mode)", String(!!navigator.standalone) + " / " + String(matchMedia("(display-mode: standalone)").matches)],
-      ["Tema scuro", String(matchMedia("(prefers-color-scheme: dark)").matches)],
-      ["screen", screen.width + " × " + screen.height],
-      ["inner", window.innerWidth + " × " + window.innerHeight],
-      ["outerHeight", String(window.outerHeight)],
-      ["clientHeight (html)", String(document.documentElement.clientHeight)],
-      ["visualViewport", vv ? Math.round(vv.height) + " (offsetTop " + Math.round(vv.offsetTop) + ", scale " + vv.scale + ")" : "n/d"],
-      ["100vh / dvh / svh / lvh", [height("vh"), height("dvh"), height("svh"), height("lvh")].join(" / ")],
-      ["safe-area top / bottom", inset("top") + " / " + inset("bottom")],
-      ["--viewport-gap / --bottom-inset", getComputedStyle(document.documentElement).getPropertyValue("--viewport-gap").trim() + " / " +
-        measureProbe("padding-top:var(--bottom-inset)", function (p) { return parseFloat(getComputedStyle(p).paddingTop) || 0; })],
-      ["html", rectOf("html")],
-      ["body", rectOf("body")],
-      ["#app", rectOf("#app")],
-      ["tabbar", rectOf("nav.tabbar")],
-      ["User agent", navigator.userAgent]
-    ];
-  }
-  function openLayoutDiagnostics() {
-    var rows = collectLayoutInfo();
-    var colored = document.documentElement.classList.contains("debug-layers");
-    var html = '<h3>Diagnostica schermo</h3>' +
-      '<p style="font-size:13px;color:var(--ink-secondary);line-height:1.5;margin-bottom:12px">' +
-        'Attiva "Colora i livelli", chiudi questo pannello e guarda di che colore è la striscia sotto la barra: ' +
-        '<b style="color:#ff00ff">magenta</b> = sfondo della pagina (html), <b style="color:#00b8d4">azzurro</b> = body, ' +
-        '<b style="color:#e6b800">giallo</b> = contenitore dell\'app, <b style="color:#00c853">verde</b> = la barra stessa. ' +
-        'Se resta <b>nera</b>, la striscia è fuori dalla pagina (la disegna iOS).</p>' +
-      '<div class="card" style="padding:12px 14px;margin-bottom:12px">' + rows.map(function (r) {
-        return '<div class="detail-row" style="gap:12px"><span>' + escapeHtml(r[0]) + '</span><span class="num" style="font-size:12px;word-break:break-word">' + escapeHtml(r[1]) + '</span></div>';
-      }).join("") + '</div>' +
-      '<div style="display:flex;flex-direction:column;gap:10px">' +
-      '<button type="button" class="btn-primary" id="diagColorBtn" style="margin-top:0">' + (colored ? "Togli i colori" : "Colora i livelli") + '</button>' +
-      '<button type="button" class="btn-ghost" id="diagCopyBtn">Copia i dati</button>' +
-      '</div>';
-    openSheet(html);
-    document.getElementById("diagColorBtn").addEventListener("click", function () {
-      document.documentElement.classList.toggle("debug-layers");
-      closeSheet();
-    });
-    document.getElementById("diagCopyBtn").addEventListener("click", function () {
-      var text = rows.map(function (r) { return r[0] + ": " + r[1]; }).join("\n");
-      navigator.clipboard.writeText(text).then(
-        function () { showToast("Dati copiati"); },
-        function () { showToast("Copia non riuscita: fai uno screenshot."); }
-      );
     });
   }
 
