@@ -17,33 +17,11 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
 (function () {
   "use strict";
 
-  /* ============================= VIEWPORT HEIGHT (PWA fix) ============================= */
-  // Su alcune PWA iOS in standalone, 100dvh non include l'area sotto
-  // l'indicatore home nonostante viewport-fit=cover: si misura l'altezza
-  // reale via JS (fonte di verità del browser) invece di fidarsi delle
-  // unità CSS, che su questo caso specifico si sono rivelate inaffidabili.
-  // Subito dopo il cold-launch da home screen, però, window.innerHeight
-  // può restituire per un istante un valore troppo basso (WebKit non ha
-  // ancora assestato il layout fullscreen): senza un resize successivo
-  // quel valore sbagliato resta fisso per sempre, lasciando lo spazio
-  // vuoto sotto la tabbar. Si ri-misura quindi anche dopo il primo
-  // frame e ad ogni volta che l'app torna in primo piano.
-  // Storico delle misure (per la diagnostica temporanea della barra in basso).
-  var appHeightLog = [];
-  var bootTime = Date.now();
-  function setAppHeight(reason) {
-    document.documentElement.style.setProperty("--app-height", window.innerHeight + "px");
-    appHeightLog.push((Date.now() - bootTime) + "ms " + (typeof reason === "string" ? reason : (reason && reason.type) || "?") + ": " + window.innerHeight);
-    if (appHeightLog.length > 15) appHeightLog.shift();
-  }
-  setAppHeight("avvio");
-  requestAnimationFrame(function () { requestAnimationFrame(function () { setAppHeight("secondo frame"); }); });
-  window.addEventListener("resize", setAppHeight);
-  window.addEventListener("orientationchange", function () { setTimeout(function () { setAppHeight("orientationchange"); }, 100); });
-  window.addEventListener("pageshow", setAppHeight);
-  document.addEventListener("visibilitychange", function () {
-    if (!document.hidden) setAppHeight("visibilitychange");
-  });
+  /* ============================= MODALITÀ APP (standalone) ============================= */
+  // L'altezza dell'app in modalità installata è gestita in CSS (vedi
+  // "App installata su iPhone" in styles.css). Questa classe è la rete di
+  // sicurezza nel caso la media query display-mode non venga riconosciuta.
+  if (navigator.standalone) document.documentElement.classList.add("standalone");
 
   /* ============================= DATA ============================= */
   var DEFAULT_EXPENSE_CATEGORIES = [
@@ -325,7 +303,7 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     var height = function (unit) { return measureProbe("height:100" + unit, function (p) { return p.getBoundingClientRect().height; }); };
     var inset = function (side) { return measureProbe("padding-top:env(safe-area-inset-" + side + ")", function (p) { return parseFloat(getComputedStyle(p).paddingTop) || 0; }); };
     return [
-      ["Standalone", String(!!navigator.standalone || matchMedia("(display-mode: standalone)").matches)],
+      ["Standalone (navigator / display-mode)", String(!!navigator.standalone) + " / " + String(matchMedia("(display-mode: standalone)").matches)],
       ["Tema scuro", String(matchMedia("(prefers-color-scheme: dark)").matches)],
       ["screen", screen.width + " × " + screen.height],
       ["inner", window.innerWidth + " × " + window.innerHeight],
@@ -334,12 +312,10 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
       ["visualViewport", vv ? Math.round(vv.height) + " (offsetTop " + Math.round(vv.offsetTop) + ", scale " + vv.scale + ")" : "n/d"],
       ["100vh / dvh / svh / lvh", [height("vh"), height("dvh"), height("svh"), height("lvh")].join(" / ")],
       ["safe-area top / bottom", inset("top") + " / " + inset("bottom")],
-      ["--app-height", getComputedStyle(document.documentElement).getPropertyValue("--app-height").trim()],
       ["html", rectOf("html")],
       ["body", rectOf("body")],
       ["#app", rectOf("#app")],
       ["tabbar", rectOf("nav.tabbar")],
-      ["Storico altezze", appHeightLog.join(" | ")],
       ["User agent", navigator.userAgent]
     ];
   }
