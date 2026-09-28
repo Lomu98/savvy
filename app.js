@@ -8,7 +8,7 @@ import {
   getAuth, GoogleAuthProvider, signInWithPopup, signOut, onAuthStateChanged
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-auth.js";
 import {
-  initializeFirestore, persistentLocalCache,
+  initializeFirestore, persistentLocalCache, persistentMultipleTabManager,
   collection, doc, addDoc, setDoc, updateDoc, deleteDoc, writeBatch,
   onSnapshot, query, where, orderBy
 } from "https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore.js";
@@ -174,8 +174,11 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
   var dbFs;
   try {
     // Enables offline persistence: writes queue locally while offline and
-    // sync automatically once the connection returns.
-    dbFs = initializeFirestore(firebaseApp, { localCache: persistentLocalCache() });
+    // sync automatically once the connection returns. The multi-tab manager
+    // keeps persistence working when the app is open in more than one tab.
+    dbFs = initializeFirestore(firebaseApp, {
+      localCache: persistentLocalCache({ tabManager: persistentMultipleTabManager() })
+    });
   } catch (e) {
     dbFs = initializeFirestore(firebaseApp, {});
   }

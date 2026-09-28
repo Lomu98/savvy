@@ -26,7 +26,16 @@
        evita il lampo della schermata di accesso a ogni avvio. -->
   <div class="boot-screen" id="bootScreen">
     <img class="auth-logo" src="icon-192.png" alt="Savvy">
+    <p class="boot-error" id="bootError" hidden>Impossibile avviare l'app. Controlla la connessione e riprova.</p>
+    <noscript><p class="boot-error">Savvy richiede JavaScript.</p></noscript>
   </div>
+  <script>
+    // Se app.js (o l'SDK Firebase) non si carica, la schermata di avvio
+    // resterebbe lì per sempre: dopo un po' si mostra un messaggio.
+    setTimeout(function () {
+      if (!document.getElementById("bootScreen").hidden) document.getElementById("bootError").hidden = false;
+    }, 10000);
+  </script>
 
   <div class="auth-screen" id="authScreen" hidden>
     <img class="auth-logo" src="icon-192.png" alt="">

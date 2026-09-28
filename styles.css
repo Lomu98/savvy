@@ -160,9 +160,10 @@ p{ margin: 0; }
 }
 .boot-screen{
   position: fixed; inset: 0; z-index: 60;
-  display: flex; align-items: center; justify-content: center;
-  background: var(--page);
+  display: flex; flex-direction: column; gap: 18px; align-items: center; justify-content: center;
+  padding: 32px; text-align: center; background: var(--page);
 }
+.boot-error{ font-size: 13.5px; color: var(--ink-secondary); max-width: 280px; line-height: 1.5; }
 .auth-logo{ width: 72px; height: 72px; border-radius: 22px; box-shadow: var(--shadow-raised); }
 .auth-screen h1{ font-size: 22px; }
 .auth-screen p{ font-size: 13.5px; color: var(--ink-secondary); max-width: 280px; line-height: 1.5; }
