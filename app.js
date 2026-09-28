@@ -119,10 +119,16 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     var s = d.toLocaleDateString("it-IT", { weekday: "long", day: "numeric", month: "long" });
     return s.charAt(0).toUpperCase() + s.slice(1);
   }
+  // L'anno compare solo se diverso da quello corrente (utile per le
+  // scadenze annuali e per lo storico).
   function formatShortDate(iso){
     var d = new Date(iso + "T00:00:00");
-    return d.toLocaleDateString("it-IT", { day: "numeric", month: "short" });
+    var opts = { day: "numeric", month: "short" };
+    if (d.getFullYear() !== new Date().getFullYear()) opts.year = "numeric";
+    return d.toLocaleDateString("it-IT", opts);
   }
+  // Classe colore per un saldo: zero resta neutro, non "positivo".
+  function signClass(n){ return n < 0 ? "negative" : n > 0 ? "positive" : ""; }
 
   function expensesForMonth(ym){
     return state.expenses.filter(function(e){ return typeof e.date === "string" && e.date.slice(0,7) === ym; });
@@ -159,6 +165,25 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
   // I colori finiscono dentro style="…": si accettano solo hex o var(--token).
   function safeColor(c){
     return /^#[0-9a-f]{3,8}$/i.test(c) || /^var\(--[a-z0-9-]+\)$/.test(c) ? c : "var(--cat-altro)";
+  }
+  // Colore del testo (chiaro o scuro) con il miglior contrasto sullo sfondo
+  // dato, che può essere un hex o una var(--token) del tema corrente:
+  // i colori delle categorie (soprattutto quelli scelti dall'utente) possono
+  // essere tanto chiari da rendere illeggibile il bianco.
+  function readableTextOn(color) {
+    var hex = color;
+    var m = /^var\((--[a-z0-9-]+)\)$/.exec(color);
+    if (m) hex = getComputedStyle(document.documentElement).getPropertyValue(m[1]).trim();
+    var h = /^#([0-9a-f]{3}|[0-9a-f]{6})/i.exec(hex);
+    if (!h) return "#fff";
+    var s = h[1].length === 3 ? h[1].replace(/./g, "$&$&") : h[1];
+    var lum = [0, 2, 4].map(function (i) {
+      var c = parseInt(s.substr(i, 2), 16) / 255;
+      return c <= 0.03928 ? c / 12.92 : Math.pow((c + 0.055) / 1.055, 2.4);
+    });
+    var L = 0.2126 * lum[0] + 0.7152 * lum[1] + 0.0722 * lum[2];
+    var vsWhite = 1.05 / (L + 0.05), vsDark = (L + 0.05) / 0.0556;
+    return vsWhite >= vsDark ? "#fff" : "#111";
   }
   // Accetta sia "12,50" sia "12.50" (e "1.234,50"); NaN se non è un numero.
   function parseAmount(str){
@@ -393,23 +418,100 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     clearTimeout(toastTimer);
     toastTimer = setTimeout(function () { t.hidden = true; }, 2200);
   }
+  var sheetOverlay = document.getElementById("sheetOverlay");
+  var sheetEl = document.getElementById("sheet");
+  var sheetContent = document.getElementById("sheetContent");
+  var sheetReturnFocus = null;
+
+  // Il focus va al contenitore, non al primo campo: su iOS aprire la
+  // tastiera in automatico sposterebbe il layout sotto il dito.
   function openSheet(html) {
-    document.getElementById("sheetContent").innerHTML = html;
-    document.getElementById("sheetOverlay").hidden = false;
+    if (sheetOverlay.hidden) sheetReturnFocus = document.activeElement;
+    sheetContent.innerHTML = html;
+    var title = sheetContent.querySelector("h3");
+    if (title) {
+      title.id = "sheetTitle";
+      sheetEl.setAttribute("aria-labelledby", "sheetTitle");
+    } else {
+      sheetEl.removeAttribute("aria-labelledby");
+    }
+    sheetEl.style.transform = "";
+    sheetOverlay.hidden = false;
+    sheetEl.focus({ preventScroll: true });
   }
   function closeSheet() {
-    document.getElementById("sheetOverlay").hidden = true;
-    document.getElementById("sheetContent").innerHTML = "";
+    sheetOverlay.hidden = true;
+    sheetContent.innerHTML = "";
+    if (sheetReturnFocus && document.body.contains(sheetReturnFocus)) sheetReturnFocus.focus({ preventScroll: true });
+    sheetReturnFocus = null;
   }
-  document.getElementById("sheetOverlay").addEventListener("click", function (e) {
-    if (e.target.id === "sheetOverlay") closeSheet();
+  sheetOverlay.addEventListener("click", function (e) {
+    if (e.target === sheetOverlay) closeSheet();
   });
+
+  // Esc chiude; Tab resta all'interno del foglio finché è aperto.
+  document.addEventListener("keydown", function (e) {
+    if (sheetOverlay.hidden) return;
+    if (e.key === "Escape") { closeSheet(); return; }
+    if (e.key !== "Tab") return;
+    var focusables = Array.prototype.filter.call(
+      sheetEl.querySelectorAll("button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled])"),
+      function (n) { return n.offsetParent !== null; }
+    );
+    if (!focusables.length) { e.preventDefault(); return; }
+    var first = focusables[0], last = focusables[focusables.length - 1];
+    if (e.shiftKey && (document.activeElement === first || document.activeElement === sheetEl)) {
+      e.preventDefault(); last.focus();
+    } else if (!e.shiftKey && document.activeElement === last) {
+      e.preventDefault(); first.focus();
+    }
+  });
+
+  // Trascinando la maniglia verso il basso oltre una soglia il foglio si chiude.
+  (function () {
+    var handle = document.getElementById("sheetHandle");
+    var startY = null, dy = 0;
+    handle.addEventListener("pointerdown", function (e) {
+      startY = e.clientY; dy = 0;
+      handle.setPointerCapture(e.pointerId);
+      sheetEl.classList.add("dragging");
+    });
+    handle.addEventListener("pointermove", function (e) {
+      if (startY === null) return;
+      dy = Math.max(0, e.clientY - startY);
+      sheetEl.style.transform = "translateY(" + dy + "px)";
+    });
+    function endDrag() {
+      if (startY === null) return;
+      startY = null;
+      sheetEl.classList.remove("dragging");
+      if (dy > 80) closeSheet(); else sheetEl.style.transform = "";
+    }
+    handle.addEventListener("pointerup", endDrag);
+    handle.addEventListener("pointercancel", endDrag);
+  })();
+
+  // Pulsante di eliminazione a due tocchi: il primo arma, il secondo
+  // conferma; se non si conferma entro 3 secondi torna allo stato iniziale.
+  function wireConfirmButton(btn, onConfirm) {
+    var original = btn.textContent, timer = null;
+    btn.addEventListener("click", function () {
+      if (btn.dataset.armed === "1") { clearTimeout(timer); onConfirm(); return; }
+      btn.dataset.armed = "1";
+      btn.textContent = "Tocca di nuovo per confermare";
+      timer = setTimeout(function () { btn.dataset.armed = ""; btn.textContent = original; }, 3000);
+    });
+  }
 
   /* ============================= NAVIGATION ============================= */
   function setView(view) {
     state.currentView = view;
     document.querySelectorAll(".view").forEach(function (v) { v.classList.toggle("active", v.id === "view-" + view); });
-    document.querySelectorAll(".tab-btn").forEach(function (b) { b.classList.toggle("active", b.dataset.view === view); });
+    document.querySelectorAll(".tab-btn").forEach(function (b) {
+      var active = b.dataset.view === view;
+      b.classList.toggle("active", active);
+      if (active) b.setAttribute("aria-current", "page"); else b.removeAttribute("aria-current");
+    });
     document.getElementById("views").scrollTop = 0;
     renderCurrentView();
   }
@@ -417,6 +519,7 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     btn.addEventListener("click", function () { setView(btn.dataset.view); });
   });
   document.getElementById("fabAdd").addEventListener("click", function () {
+    if (state.currentView === "recurring") { openAddRecurringSheet("expense"); return; }
     var kind = (state.currentView === "list" && state.listType === "income") ? "income" : "expense";
     openAddTransactionSheet(kind);
   });
@@ -447,15 +550,16 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
   function randomCategoryColor(){ return CATEGORY_COLOR_PALETTE[Math.floor(Math.random() * CATEGORY_COLOR_PALETTE.length)]; }
 
   function categoryGridHtml(selectedSlug, name, kind) {
-    var grid = '<div class="cat-grid" id="' + name + '">' + getCategories(kind).map(function (c) {
-      return '<div class="cat-opt' + (c.slug === selectedSlug ? " selected" : "") + '" data-slug="' + escapeHtml(c.slug) + '">' +
-        '<span class="cat-dot" style="background:' + safeColor(c.color) + '"></span><span>' + escapeHtml(c.name) + '</span></div>';
+    var grid = '<div class="cat-grid" id="' + name + '" role="group" aria-label="Categoria">' + getCategories(kind).map(function (c) {
+      var selected = c.slug === selectedSlug;
+      return '<button type="button" class="cat-opt' + (selected ? " selected" : "") + '" aria-pressed="' + selected + '" data-slug="' + escapeHtml(c.slug) + '">' +
+        '<span class="cat-dot" style="background:' + safeColor(c.color) + '"></span><span>' + escapeHtml(c.name) + '</span></button>';
     }).join("") +
-      '<div class="cat-opt cat-opt-add" data-slug="__add__"><span class="cat-dot-add">+</span><span>Nuova</span></div>' +
+      '<button type="button" class="cat-opt cat-opt-add" data-slug="__add__"><span class="cat-dot-add" aria-hidden="true">+</span><span>Nuova</span></button>' +
       '</div>';
     var form = '<div class="new-cat-form" id="' + name + 'NewCat" hidden>' +
       '<div class="new-cat-form-row">' +
-        '<input type="text" class="new-cat-name" placeholder="Nome categoria" maxlength="30">' +
+        '<input type="text" class="new-cat-name" placeholder="Nome categoria" maxlength="30" aria-label="Nome nuova categoria" enterkeyhint="done">' +
         '<input type="color" class="new-cat-color" value="' + randomCategoryColor() + '" aria-label="Colore categoria">' +
       '</div>' +
       '<div class="new-cat-actions">' +
@@ -470,8 +574,12 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     var form = document.getElementById(gridId + "NewCat");
 
     function selectOpt(opt) {
-      grid.querySelectorAll(".cat-opt").forEach(function (o) { o.classList.remove("selected"); });
+      grid.querySelectorAll(".cat-opt:not(.cat-opt-add)").forEach(function (o) {
+        o.classList.remove("selected");
+        o.setAttribute("aria-pressed", "false");
+      });
       opt.classList.add("selected");
+      opt.setAttribute("aria-pressed", "true");
       onSelect(opt.dataset.slug);
     }
     function wireOpt(opt) {
@@ -484,7 +592,14 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
       form.hidden = false;
       form.querySelector(".new-cat-name").focus();
     });
-    form.querySelector(".new-cat-cancel").addEventListener("click", function () { form.hidden = true; });
+    form.querySelector(".new-cat-cancel").addEventListener("click", function () { form.hidden = true; addOpt.focus(); });
+    // Il campo sta dentro il <form> del movimento: Invio qui deve creare
+    // la categoria, non inviare il movimento.
+    form.querySelector(".new-cat-name").addEventListener("keydown", function (e) {
+      if (e.key !== "Enter") return;
+      e.preventDefault();
+      form.querySelector(".new-cat-save").click();
+    });
     form.querySelector(".new-cat-save").addEventListener("click", function () {
       var name = form.querySelector(".new-cat-name").value.trim();
       var color = form.querySelector(".new-cat-color").value;
@@ -494,7 +609,8 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
       state.customCategories.push(newCat);
       dbAddCategory(slug, name, color, kind);
 
-      var tile = document.createElement("div");
+      var tile = document.createElement("button");
+      tile.type = "button";
       tile.className = "cat-opt";
       tile.dataset.slug = slug;
       tile.innerHTML = '<span class="cat-dot" style="background:' + safeColor(color) + '"></span><span>' + escapeHtml(name) + '</span>';
@@ -504,30 +620,44 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
 
       form.hidden = true;
       form.querySelector(".new-cat-name").value = "";
+      tile.focus({ preventScroll: true });
       showToast("Categoria creata");
     });
   }
 
   /* ============================= ADD TRANSACTION SHEET ============================= */
-  var lastUsedExpenseCategory = DEFAULT_EXPENSE_CATEGORIES[0].slug;
-  var lastUsedIncomeCategory = DEFAULT_INCOME_CATEGORIES[0].slug;
+  // Ultima categoria usata per tipo, ricordata tra un avvio e l'altro.
+  // localStorage può non essere disponibile (navigazione privata ecc.).
+  function readLastCategory(kind) {
+    try { return localStorage.getItem("savvy.lastCategory." + kind); } catch (e) { return null; }
+  }
+  function saveLastCategory(kind, slug) {
+    try { localStorage.setItem("savvy.lastCategory." + kind, slug); } catch (e) { /* non essenziale */ }
+  }
+  function lastUsedCategory(kind) {
+    var cats = getCategories(kind);
+    var saved = readLastCategory(kind);
+    return cats.some(function (c) { return c.slug === saved; }) ? saved : cats[0].slug;
+  }
   function openAddTransactionSheet(kind, prefill) {
     kind = kind || "expense";
     var isIncome = kind === "income";
-    var lastUsed = isIncome ? lastUsedIncomeCategory : lastUsedExpenseCategory;
+    var lastUsed = lastUsedCategory(kind);
     prefill = prefill || {};
     var html =
+      '<form id="txForm" novalidate>' +
       '<h3>Nuovo movimento</h3>' +
       '<div class="type-toggle" id="txTypeToggle">' +
-        '<button type="button" class="type-toggle-btn' + (!isIncome ? " active" : "") + '" data-kind="expense">Spesa</button>' +
-        '<button type="button" class="type-toggle-btn' + (isIncome ? " active" : "") + '" data-kind="income">Entrata</button>' +
+        '<button type="button" class="type-toggle-btn' + (!isIncome ? " active" : "") + '" aria-pressed="' + !isIncome + '" data-kind="expense">Spesa</button>' +
+        '<button type="button" class="type-toggle-btn' + (isIncome ? " active" : "") + '" aria-pressed="' + isIncome + '" data-kind="income">Entrata</button>' +
       '</div>' +
       '<div class="field amount-field"><label for="txAmount">Importo</label>' +
-        '<input type="text" id="txAmount" inputmode="decimal" autocomplete="off" placeholder="0,00" autofocus></div>' +
-      '<div class="field"><label>Categoria</label>' + categoryGridHtml(lastUsed, "addCatGrid", kind) + '</div>' +
+        '<input type="text" id="txAmount" inputmode="decimal" autocomplete="off" placeholder="0,00"></div>' +
+      '<div class="field"><span class="field-label">Categoria</span>' + categoryGridHtml(lastUsed, "addCatGrid", kind) + '</div>' +
       '<div class="field"><label for="txDate">Data</label><input type="date" id="txDate" value="' + todayISO() + '"></div>' +
-      '<div class="field"><label for="txNote">Nota (opzionale)</label><input type="text" id="txNote" placeholder="' + (isIncome ? "Es. Bonifico stipendio" : "Es. Spesa al supermercato") + '" maxlength="120"></div>' +
-      '<button class="btn-primary" id="saveTxBtn">' + (isIncome ? "Aggiungi entrata" : "Aggiungi spesa") + '</button>';
+      '<div class="field"><label for="txNote">Nota (opzionale)</label><input type="text" id="txNote" placeholder="' + (isIncome ? "Es. Bonifico stipendio" : "Es. Spesa al supermercato") + '" maxlength="120" enterkeyhint="done"></div>' +
+      '<button type="submit" class="btn-primary">' + (isIncome ? "Aggiungi entrata" : "Aggiungi spesa") + '</button>' +
+      '</form>';
     openSheet(html);
     if (prefill.amount) document.getElementById("txAmount").value = prefill.amount;
     if (prefill.date) document.getElementById("txDate").value = prefill.date;
@@ -546,12 +676,13 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
 
     var selectedCat = lastUsed;
     wireCategoryGrid("addCatGrid", function (slug) { selectedCat = slug; }, kind);
-    document.getElementById("saveTxBtn").addEventListener("click", function () {
+    document.getElementById("txForm").addEventListener("submit", function (e) {
+      e.preventDefault();
       var amountVal = parseAmount(document.getElementById("txAmount").value);
       var dateVal = document.getElementById("txDate").value || todayISO();
       var noteVal = document.getElementById("txNote").value.trim();
       if (!amountVal || amountVal <= 0) { showToast("Inserisci un importo valido."); return; }
-      if (isIncome) lastUsedIncomeCategory = selectedCat; else lastUsedExpenseCategory = selectedCat;
+      saveLastCategory(kind, selectedCat);
       var data = {
         amount: Math.round(amountVal * 100) / 100,
         category: selectedCat,
@@ -584,13 +715,7 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
       '</div>';
     openSheet(html);
     document.getElementById("cancelDetailBtn").addEventListener("click", closeSheet);
-    document.getElementById("deleteTxBtn").addEventListener("click", function () {
-      var btn = this;
-      if (btn.dataset.armed !== "1") {
-        btn.dataset.armed = "1";
-        btn.textContent = "Conferma eliminazione";
-        return;
-      }
+    wireConfirmButton(document.getElementById("deleteTxBtn"), function () {
       if (isIncome) dbDeleteIncome(tx.id); else dbDeleteExpense(tx.id);
       closeSheet();
       showToast(isIncome ? "Entrata eliminata" : "Spesa eliminata");
@@ -630,7 +755,7 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
 
     var html = '<div class="card">' +
       '<div class="hero-label">Saldo a ' + formatMonthLabel(state.currentMonth) + '</div>' +
-      '<div class="hero-amount num ' + (net < 0 ? "negative" : "positive") + '">' + (net < 0 ? "−" : "") + formatMoney(Math.abs(net)) + '</div>' +
+      '<div class="hero-amount num ' + signClass(net) + '">' + (net < 0 ? "−" : "") + formatMoney(Math.abs(net)) + '</div>' +
       '<div class="hero-split">' +
         '<span class="hero-split-item income"><span class="hero-split-dot"></span>Entrate <b class="num">' + formatMoney(incomeTotal) + '</b></span>' +
         '<span class="hero-split-item expense"><span class="hero-split-dot"></span>Uscite <b class="num">' + formatMoney(expenseTotal) + '</b></span>' +
@@ -671,11 +796,11 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     var recent = recentTransactions(monthExpenses, monthIncomes, 5);
     var totalCount = monthExpenses.length + monthIncomes.length;
     html += '<div class="section-title" style="display:flex;justify-content:space-between;align-items:center">' +
-      '<span>Transazioni recenti</span>' + (totalCount > 5 ? '<button class="link-btn" id="seeAllBtn" style="margin:0">Vedi tutte</button>' : '') + '</div>';
+      '<span>Movimenti recenti</span>' + (totalCount > 5 ? '<button class="link-btn" id="seeAllBtn" style="margin:0">Vedi tutti</button>' : '') + '</div>';
     if (recent.length) {
       html += '<div class="card">' + recent.map(function (e) { return txRowHtml(e); }).join("") + '</div>';
     } else {
-      html += emptyStateHtml("Nessuna transazione registrata questo mese.", "Aggiungi la prima transazione", "emptyAddBtn");
+      html += emptyStateHtml("Nessun movimento registrato questo mese.", "Aggiungi il primo movimento", "emptyAddBtn");
     }
 
     el.innerHTML = html;
@@ -695,11 +820,12 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     kind = e._kind || kind || "expense";
     var isIncome = kind === "income";
     var cat = catByslug(e.category);
-    return '<div class="tx-row" data-id="' + escapeHtml(e.id) + '" data-kind="' + kind + '">' +
-      '<div class="tx-icon" style="background:' + safeColor(cat.color) + '">' + escapeHtml(catInitial(e.category)) + '</div>' +
-      '<div class="tx-main"><div class="tx-title">' + escapeHtml(e.note || cat.name) + '</div>' +
-      '<div class="tx-sub">' + escapeHtml(cat.name) + ' · ' + formatShortDate(e.date) + '</div></div>' +
-      '<div class="tx-amount num' + (isIncome ? " income" : "") + '">' + (isIncome ? "+" : "") + formatMoney(e.amount) + '</div></div>';
+    var color = safeColor(cat.color);
+    return '<button type="button" class="tx-row" data-id="' + escapeHtml(e.id) + '" data-kind="' + kind + '">' +
+      '<span class="tx-icon" aria-hidden="true" style="background:' + color + ';color:' + readableTextOn(color) + '">' + escapeHtml(catInitial(e.category)) + '</span>' +
+      '<span class="tx-main"><span class="tx-title">' + escapeHtml(e.note || cat.name) + '</span>' +
+      '<span class="tx-sub">' + escapeHtml(cat.name) + ' · ' + formatShortDate(e.date) + '</span></span>' +
+      '<span class="tx-amount num' + (isIncome ? " income" : "") + '">' + (isIncome ? "+" : "") + formatMoney(e.amount) + '</span></button>';
   }
   function wireTxRows(container) {
     container.querySelectorAll(".tx-row").forEach(function (row) {
@@ -713,7 +839,7 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
   }
   function emptyStateHtml(message, ctaLabel, ctaId) {
     return '<div class="empty-state">' +
-      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M3 10h18M8 4h8"/></svg>' +
+      '<svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M3 10h18M8 4h8"/></svg>' +
       '<p>' + message + '</p>' +
       (ctaLabel ? '<button id="' + ctaId + '">' + ctaLabel + '</button>' : '') +
       '</div>';
@@ -728,16 +854,19 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     var filtered = state.listFilter === "all" ? monthList : monthList.filter(function (e) { return e.category === state.listFilter; });
 
     var toggle = '<div class="type-toggle" id="listTypeToggle">' +
-      '<button class="type-toggle-btn' + (!isIncome ? " active" : "") + '" data-kind="expense">Uscite</button>' +
-      '<button class="type-toggle-btn' + (isIncome ? " active" : "") + '" data-kind="income">Entrate</button>' +
+      '<button type="button" class="type-toggle-btn' + (!isIncome ? " active" : "") + '" aria-pressed="' + !isIncome + '" data-kind="expense">Uscite</button>' +
+      '<button type="button" class="type-toggle-btn' + (isIncome ? " active" : "") + '" aria-pressed="' + isIncome + '" data-kind="income">Entrate</button>' +
       '</div>';
 
-    var chips = '<div class="chip-row" id="listChips">' +
-      '<div class="chip' + (state.listFilter === "all" ? " active" : "") + '" data-slug="all">Tutte</div>' +
-      getCategories(kind).map(function (c) {
-        return '<div class="chip' + (state.listFilter === c.slug ? " active" : "") + '" data-slug="' + escapeHtml(c.slug) + '">' +
-          '<span class="cat-dot" style="background:' + safeColor(c.color) + '"></span>' + escapeHtml(c.name) + '</div>';
-      }).join("") + '</div>';
+    function chipHtml(slug, label, color) {
+      var active = state.listFilter === slug;
+      return '<button type="button" class="chip' + (active ? " active" : "") + '" aria-pressed="' + active + '" data-slug="' + escapeHtml(slug) + '">' +
+        (color ? '<span class="cat-dot" style="background:' + safeColor(color) + '"></span>' : '') + escapeHtml(label) + '</button>';
+    }
+    var chips = '<div class="chip-row" id="listChips" role="group" aria-label="Filtra per categoria">' +
+      chipHtml("all", "Tutte", null) +
+      getCategories(kind).map(function (c) { return chipHtml(c.slug, c.name, c.color); }).join("") +
+      '</div>';
 
     var body;
     if (!filtered.length) {
@@ -750,6 +879,10 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
         byDay[e.date].push(e);
       });
       order.sort().reverse();
+      // Nello stesso giorno: prima i più recenti, come in Home.
+      order.forEach(function (day) {
+        byDay[day].sort(function (a, b) { return (a.createdAt || "") < (b.createdAt || "") ? 1 : -1; });
+      });
       body = order.map(function (day) {
         return '<div class="day-heading">' + formatDayHeading(day) + '</div><div class="card">' +
           byDay[day].map(function (e) { return txRowHtml(e, kind); }).join("") + '</div>';
@@ -757,15 +890,24 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     }
 
     el.innerHTML = toggle + chips + body;
-    document.querySelectorAll("#listTypeToggle .type-toggle-btn").forEach(function (btn) {
+    // Il re-render sostituisce i pulsanti: si rimette il focus su quello
+    // appena premuto, altrimenti chi usa tastiera o screen reader lo perde.
+    el.querySelectorAll("#listTypeToggle .type-toggle-btn").forEach(function (btn) {
       btn.addEventListener("click", function () {
         state.listType = btn.dataset.kind;
         state.listFilter = "all";
         renderList();
+        el.querySelector('#listTypeToggle [data-kind="' + state.listType + '"]').focus({ preventScroll: true });
       });
     });
-    document.querySelectorAll("#listChips .chip").forEach(function (chip) {
-      chip.addEventListener("click", function () { state.listFilter = chip.dataset.slug; renderList(); });
+    el.querySelectorAll("#listChips .chip").forEach(function (chip) {
+      chip.addEventListener("click", function () {
+        var slug = chip.dataset.slug;
+        state.listFilter = slug;
+        renderList();
+        var again = el.querySelector('#listChips [data-slug="' + CSS.escape(slug) + '"]');
+        if (again) again.focus({ preventScroll: true });
+      });
     });
     var listEmptyAddBtn = document.getElementById("listEmptyAddBtn");
     if (listEmptyAddBtn) listEmptyAddBtn.addEventListener("click", function () { openAddTransactionSheet(kind); });
@@ -811,7 +953,7 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     var html = '<div class="stat-tiles">' +
       '<div class="stat-tile"><div class="stat-tile-label">Entrate mese</div><div class="stat-tile-value num">' + formatMoney(incomeTotal) + '</div></div>' +
       '<div class="stat-tile"><div class="stat-tile-label">Uscite mese</div><div class="stat-tile-value num">' + formatMoney(expenseTotal) + '</div></div>' +
-      '<div class="stat-tile"><div class="stat-tile-label">Saldo mese</div><div class="stat-tile-value num" style="color:' + (net < 0 ? "var(--critical)" : "var(--good)") + '">' + (net < 0 ? "−" : "") + formatMoney(Math.abs(net)) + '</div></div>' +
+      '<div class="stat-tile"><div class="stat-tile-label">Saldo mese</div><div class="stat-tile-value num ' + signClass(net) + '">' + (net < 0 ? "−" : "") + formatMoney(Math.abs(net)) + '</div></div>' +
       '<div class="stat-tile"><div class="stat-tile-label">Media/giorno (uscite)</div><div class="stat-tile-value num">' + avgPerDayLabel + '</div></div>' +
       '</div>';
 
@@ -840,23 +982,37 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     function xAt(i) { return padL + i * stepX; }
     function yAt(v) { return padT + innerH - (v / max) * innerH; }
 
+    // Ogni punto ha un cerchio visibile piccolo e uno trasparente più grande
+    // che riceve il tocco: i soli marker (r 3.5) erano quasi impossibili da colpire.
     function buildSeries(totals, seriesKey, color) {
       var points = totals.map(function (v, i) { return [xAt(i), yAt(v)]; });
       var linePath = points.map(function (p, i) { return (i === 0 ? "M" : "L") + p[0].toFixed(1) + "," + p[1].toFixed(1); }).join(" ");
       var markers = points.map(function (p, i) {
         var isLast = i === points.length - 1;
         var r = isLast ? 5 : 3.5;
-        return '<circle class="trend-pt" data-i="' + i + '" data-series="' + seriesKey + '" cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="' + r + '" fill="' + (isLast ? color : "var(--surface)") + '" stroke="' + color + '" stroke-width="2" style="cursor:pointer"/>';
+        return '<circle cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="' + r + '" fill="' + (isLast ? color : "var(--surface)") + '" stroke="' + color + '" stroke-width="2" pointer-events="none"/>';
       }).join("");
-      return { linePath: linePath, markers: markers };
+      var hits = points.map(function (p, i) {
+        return '<circle class="trend-pt" data-i="' + i + '" data-series="' + seriesKey + '" cx="' + p[0].toFixed(1) + '" cy="' + p[1].toFixed(1) + '" r="12" fill="transparent" style="cursor:pointer"/>';
+      }).join("");
+      return { linePath: linePath, markers: markers, hits: hits };
     }
 
     var expenseSeries = buildSeries(expenseTotals, "expense", "var(--critical)");
     var incomeSeries = buildSeries(incomeTotals, "income", "var(--good)");
 
+    // Linee guida con il relativo valore, così l'ordine di grandezza si
+    // legge senza dover toccare i punti. Omesse se non ci sono dati.
+    var hasData = expenseTotals.concat(incomeTotals).some(function (v) { return v > 0; });
+    function compactMoney(v) {
+      return v >= 1000
+        ? (v / 1000).toLocaleString("it-IT", { maximumFractionDigits: 1 }) + "k €"
+        : Math.round(v).toLocaleString("it-IT") + " €";
+    }
     var gridLines = [0.33, 0.66, 1].map(function (f) {
       var y = padT + innerH * (1 - f);
-      return '<line x1="' + padL + '" y1="' + y.toFixed(1) + '" x2="' + (W - padR) + '" y2="' + y.toFixed(1) + '" stroke="var(--gridline)" stroke-width="1"/>';
+      return '<line x1="' + padL + '" y1="' + y.toFixed(1) + '" x2="' + (W - padR) + '" y2="' + y.toFixed(1) + '" stroke="var(--gridline)" stroke-width="1"/>' +
+        (hasData ? '<text x="' + (W - padR) + '" y="' + (y - 3).toFixed(1) + '" font-size="8.5" fill="var(--ink-muted)" text-anchor="end" font-family="var(--font-body)">' + compactMoney(max * f) + '</text>' : '');
     }).join("");
 
     var labels = months.map(function (m, i) {
@@ -865,12 +1021,17 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
       return '<text x="' + xAt(i).toFixed(1) + '" y="' + (H - 4) + '" font-size="9.5" fill="var(--ink-muted)" text-anchor="middle" font-family="var(--font-body)">' + lbl + '</text>';
     }).join("");
 
-    var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" aria-label="Andamento entrate e uscite negli ultimi sei mesi">' +
+    // Per gli screen reader il grafico è un'immagine con i valori nel testo alternativo.
+    var summary = "Andamento entrate e uscite negli ultimi sei mesi. " + months.map(function (m, i) {
+      return formatMonthLabel(m) + ": uscite " + formatMoney(expenseTotals[i]) + ", entrate " + formatMoney(incomeTotals[i]);
+    }).join("; ");
+    var svg = '<svg viewBox="0 0 ' + W + ' ' + H + '" preserveAspectRatio="none" role="img" aria-label="' + escapeHtml(summary) + '">' +
       gridLines +
       '<path d="' + expenseSeries.linePath + '" fill="none" stroke="var(--critical)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>' +
       '<path d="' + incomeSeries.linePath + '" fill="none" stroke="var(--good)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>' +
       expenseSeries.markers + incomeSeries.markers +
       labels +
+      expenseSeries.hits + incomeSeries.hits +
       '</svg>';
 
     container.innerHTML =
@@ -885,11 +1046,14 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
         var i = parseInt(pt.dataset.i, 10);
         var seriesKey = pt.dataset.series;
         var value = seriesKey === "income" ? incomeTotals[i] : expenseTotals[i];
+        // Coordinate relative alla card (che contiene il tooltip), non
+        // all'SVG: vanno sommati padding e altezza della legenda.
         var svgRect = container.querySelector("svg").getBoundingClientRect();
+        var boxRect = container.getBoundingClientRect();
         var scaleX = svgRect.width / W;
         var scaleY = svgRect.height / H;
-        var cx = parseFloat(pt.getAttribute("cx")) * scaleX;
-        var cy = parseFloat(pt.getAttribute("cy")) * scaleY;
+        var cx = svgRect.left - boxRect.left + parseFloat(pt.getAttribute("cx")) * scaleX;
+        var cy = svgRect.top - boxRect.top + parseFloat(pt.getAttribute("cy")) * scaleY;
         tooltip = document.createElement("div");
         tooltip.className = "trend-tooltip";
         tooltip.style.left = cx + "px";
@@ -1005,16 +1169,16 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
 
   function recurringSectionHtml(title, list, kind, addBtnId, emptyBtnId) {
     var html = '<div class="section-title" style="display:flex;justify-content:space-between;align-items:center"><span>' + title + '</span>' +
-      '<button class="recurring-add-btn" id="' + addBtnId + '">+ Nuova</button></div>';
+      '<button type="button" class="recurring-add-btn" id="' + addBtnId + '" aria-label="' + (kind === "income" ? "Aggiungi entrata ricorrente" : "Aggiungi spesa ricorrente") + '">+ Nuova</button></div>';
     if (list.length) {
       html += '<div class="card">' + list.map(function (r) {
         var cat = catByslug(r.category);
         var isIncome = kind === "income";
         return '<div class="recurring-row" data-id="' + escapeHtml(r.id) + '">' +
           '<span class="cat-dot" style="background:' + safeColor(cat.color) + '"></span>' +
-          '<div class="recurring-main"><div class="recurring-title">' + escapeHtml(r.name) + '</div>' +
-          '<div class="recurring-sub">' + (isIncome ? "+" : "") + formatMoney(r.amount) + ' · ' + frequencyLabel(r) + ' · ' + escapeHtml(cat.name) + '</div></div>' +
-          '<button class="switch' + (r.active ? " on" : "") + '" data-toggle="' + escapeHtml(r.id) + '" aria-label="Attiva o disattiva"></button>' +
+          '<button type="button" class="recurring-main"><span class="recurring-title">' + escapeHtml(r.name) + '</span>' +
+          '<span class="recurring-sub">' + (isIncome ? "+" : "") + formatMoney(r.amount) + ' · ' + frequencyLabel(r) + ' · ' + escapeHtml(cat.name) + '</span></button>' +
+          '<button type="button" class="switch' + (r.active ? " on" : "") + '" role="switch" aria-checked="' + !!r.active + '" data-toggle="' + escapeHtml(r.id) + '" aria-label="' + escapeHtml(r.name) + ' attiva"></button>' +
           '</div>';
       }).join("") + '</div>';
     } else {
@@ -1040,7 +1204,7 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
           var isIncome = recurringKind(r) === "income";
           return '<div class="pending-item" data-id="' + escapeHtml(r.id) + '"><span class="cat-dot" style="background:' + safeColor(cat.color) + '"></span>' +
             '<div class="tx-main"><div class="tx-title">' + escapeHtml(r.name) + '</div><div class="tx-sub">' + escapeHtml(cat.name) + ' · ' + formatShortDate(getNextDueDate(r)) + ' · ' + (isIncome ? "+" : "") + formatMoney(r.amount) + '</div></div>' +
-            '<button class="btn-small" data-apply="' + escapeHtml(r.id) + '">Aggiungi</button></div>';
+            '<button type="button" class="btn-small" data-apply="' + escapeHtml(r.id) + '" aria-label="Aggiungi ' + escapeHtml(r.name) + '">Aggiungi</button></div>';
         }).join("") +
         (pending.length > 1 ? '<button class="btn-ghost" id="applyAllBtn" style="margin-top:12px">Aggiungi tutte (' + pending.length + ')</button>' : "") +
         '</div>';
@@ -1116,20 +1280,22 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     kind = kind || "expense";
     var isIncome = kind === "income";
     var defaultCat = isIncome ? "stipendio" : "abbonamenti";
-    var html = '<h3>' + (isIncome ? "Nuova entrata ricorrente" : "Nuova spesa ricorrente") + '</h3>' +
+    var html = '<form id="recForm" novalidate>' +
+      '<h3>' + (isIncome ? "Nuova entrata ricorrente" : "Nuova spesa ricorrente") + '</h3>' +
       '<div class="field"><label for="recName">Nome</label><input type="text" id="recName" placeholder="' + (isIncome ? "Es. Stipendio" : "Es. Abbonamento palestra") + '" maxlength="80"></div>' +
       '<div class="field amount-field"><label for="recAmount">Importo</label><input type="text" id="recAmount" inputmode="decimal" autocomplete="off" placeholder="0,00"></div>' +
-      '<div class="field"><label>Categoria</label>' + categoryGridHtml(defaultCat, "recCatGrid", kind) + '</div>' +
-      '<div class="field"><label>Frequenza</label><div class="freq-row">' +
-        '<div class="field"><input type="number" id="recInterval" min="1" max="99" value="1"></div>' +
-        '<div class="field"><select id="recUnit">' +
+      '<div class="field"><span class="field-label">Categoria</span>' + categoryGridHtml(defaultCat, "recCatGrid", kind) + '</div>' +
+      '<div class="field"><span class="field-label" id="recFreqLabel">Frequenza</span><div class="freq-row" role="group" aria-labelledby="recFreqLabel">' +
+        '<div class="field"><input type="number" inputmode="numeric" id="recInterval" min="1" max="99" value="1" aria-label="Ogni quanti"></div>' +
+        '<div class="field"><select id="recUnit" aria-label="Unità">' +
           '<option value="week">Settimane</option>' +
           '<option value="month" selected>Mesi</option>' +
           '<option value="year">Anni</option>' +
         '</select></div>' +
       '</div></div>' +
       '<div class="field"><label for="recNextDate">Prossima scadenza</label><input type="date" id="recNextDate" value="' + todayISO() + '"></div>' +
-      '<button class="btn-primary" id="saveRecurringBtn">Salva</button>';
+      '<button type="submit" class="btn-primary">Salva</button>' +
+      '</form>';
     openSheet(html);
     var selectedCat = defaultCat;
     wireCategoryGrid("recCatGrid", function (slug) { selectedCat = slug; }, kind);
@@ -1145,7 +1311,8 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
     intervalInput.addEventListener("input", updateUnitLabels);
     updateUnitLabels();
 
-    document.getElementById("saveRecurringBtn").addEventListener("click", function () {
+    document.getElementById("recForm").addEventListener("submit", function (e) {
+      e.preventDefault();
       var name = document.getElementById("recName").value.trim();
       var amount = parseAmount(document.getElementById("recAmount").value);
       var interval = parseInt(intervalInput.value, 10);
@@ -1186,9 +1353,7 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
       '<button class="btn-ghost" id="closeRecDetailBtn">Chiudi</button></div>';
     openSheet(html);
     document.getElementById("closeRecDetailBtn").addEventListener("click", closeSheet);
-    document.getElementById("deleteRecBtn").addEventListener("click", function () {
-      var btn = this;
-      if (btn.dataset.armed !== "1") { btn.dataset.armed = "1"; btn.textContent = "Conferma eliminazione"; return; }
+    wireConfirmButton(document.getElementById("deleteRecBtn"), function () {
       dbDeleteRecurring(r.id);
       closeSheet();
       showToast("Ricorrente eliminata");
@@ -1202,6 +1367,10 @@ import { FIREBASE_CONFIG } from "./firebase-config.js";
       navigator.serviceWorker.register("./sw.js").catch(function () { /* non-fatal */ });
     });
   }
+
+  // Al cambio di tema i colori delle categorie cambiano, e con loro il
+  // colore di testo leggibile calcolato in readableTextOn.
+  window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", renderCurrentView);
 
   /* ============================= INIT ============================= */
   updateMonthLabel();
